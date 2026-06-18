@@ -1,0 +1,15 @@
+[package]
+name = "gluon_debug"
+version = "1.0.0"
+edition = "2024"
+authors = ["The Gluon3 Contributors"]
+
+description = "The Gluon3 compilers's extra debugging utilities shared across phases"
+readme = "README.md"
+
+repository = "https://github.com/duplessisaurore/gluon3"
+license = "AGPLv3"
+
+keywords = ["languages", "scripting", "script"]
+
+[dependencies]

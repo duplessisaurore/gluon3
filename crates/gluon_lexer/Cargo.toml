@@ -1,0 +1,16 @@
+[package]
+name = "gluon_lexer"
+version = "1.0.0"
+edition = "2024"
+authors = ["The Gluon3 Contributors"]
+
+description = "The Gluon3 compilers's lexer which takes textual source code and tokenises it"
+readme = "README.md"
+
+repository = "https://github.com/duplessisaurore/gluon3"
+license = "AGPLv3"
+
+keywords = ["languages", "scripting", "script"]
+
+[dependencies]
+gluon_debug = { workspace = true }

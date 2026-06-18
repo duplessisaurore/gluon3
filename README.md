@@ -23,6 +23,8 @@
 
 `Gluon3` is an experimental free and open-source compiler for the `Fermion3` language that translates `Fermion3` into the more textual assembly language `Quark3` that can then be assembled into `Lepton3` bytecode. `Fermion3` aims to be an improvement of the prior `Faerlys` and `Quasar2` languages. As it is part of version 3.0, there is a `3` at the end.
 
+`Gluon3` aims to be a version 1 compiler for `Fermion3` and supports a subset of the language's features, mainly excluding macros. Future work aims to integrate macros, SMT solvers over guards, static analysis and code optimisation.
+
 Please view the **[Fermion3 Language Specification](https://github.com/duplessisaurore/fermion3/blob/main/LANGUAGE.md)** to learn more about `Fermion3` itself.
 
 <a name="community"></a>
