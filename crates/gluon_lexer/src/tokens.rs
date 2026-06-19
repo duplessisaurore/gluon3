@@ -38,6 +38,22 @@ pub enum TokenKind {
     /// Stored as i64 after parsing the prefix/base
     LitInt(i64),
 
+    /// Unsigned Integer literals
+    /// ------------------
+    /// 
+    /// As per the specification this can come from:
+    /// 
+    /// decimal, 
+    /// hex (0x), 
+    /// binary (0b), 
+    /// octal (0o)
+    /// 
+    /// all followed by a "u", to differentiate from normal
+    /// integer literals. This does not support negative numbers.
+    /// 
+    /// Stored as u64 after parsing the prefix/base
+    LitUInt(u64),
+
     /// Floating point literal
     /// ------------------
     /// 
