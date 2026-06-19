@@ -21,7 +21,7 @@ extern crate alloc;
 /// A source file which points to some file on disk
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
-    pub filename: Rc<String>,
+    pub filename: String,
 }
 
 /// A source location in a file

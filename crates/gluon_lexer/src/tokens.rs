@@ -18,6 +18,7 @@ pub type Token = Located<TokenKind>;
 ///     All string-literal related tokens (including interp) start with `Str`
 ///     All keywords start with `Kw`'
 ///     All delimiters start with `Del`
+///     All macro related (non-keywords) start with `Macro`
 /// 
 /// Other elements do not really have a category.
 ///     
@@ -133,12 +134,15 @@ pub enum TokenKind {
     /// Opens a string literal
     /// 
     /// This should be done when the lexer sees the closing double quote '"'
-    StringEnd,
+    StrEnd,
 
     // = Keywords (Kw) =
 
     /// Function definition
     KwFn,
+
+    /// Macro function prefix
+    KwMacro,
 
     /// Binding a local
     KwLet,
@@ -243,6 +247,40 @@ pub enum TokenKind {
     // This is context sensitive with the operator Less/Greater
     DelLAngle,   // <
     DelRAngle,   // >
+
+    // = Macros (Macro) =
+
+    /// Start of a quote in a macro
+    /// 
+    /// '{
+    MacroQuoteStart,
+
+    /// End of a quote of a macro 
+    /// 
+    /// }
+    MacroQuoteEnd,
+
+    /// Start of a splice in a macro quote
+    /// This is like string interpolation but macros
+    /// 
+    /// $(
+    MacroSpliceStart,
+
+    /// End of a macro splice in a quote )
+    MacroSpliceEnd,
+
+    /// @ For macro invocation compared 
+    /// to normal function names as idents
+    MacroAt,
+
+    /// # For #name hygiene escape in macros
+    /// which lets you do
+    /// 
+    /// let #it = $(cond)..
+    /// 
+    /// and then "it" will be actually produced in
+    /// the output for the macro
+    MacroHash,
 
     /// End of file
     Eof,

@@ -20,3 +20,10 @@ extern crate alloc;
 /// 
 /// This defines all the token types
 pub mod tokens;
+
+/// The lexer type which can be used to produce the tokens
+/// described.
+/// 
+/// This takes in the textual string input and produces
+/// the tokens as the output in a list.
+pub mod lexer;
