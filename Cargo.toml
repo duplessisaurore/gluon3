@@ -8,4 +8,7 @@ resolver = "3"
 [workspace.dependencies]
 hashbrown = "0.17.1"
 quark3 = { git = "https://github.com/duplessisaurore/quark3" }
+lepton3 = { git = "https://github.com/duplessisaurore/lepton3" }
+
 gluon_debug = { path = "./crates/gluon_debug" }
+gluon_lexer = { path = "./crates/gluon_lexer" }

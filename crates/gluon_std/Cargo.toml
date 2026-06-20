@@ -1,0 +1,20 @@
+[package]
+name = "gluon_std"
+version = "1.0.0"
+edition = "2024"
+authors = ["The Gluon3 Contributors"]
+
+description = "The Gluon3 compiler binary for rust_std supported systems."
+readme = "README.md"
+
+repository = "https://github.com/duplessisaurore/gluon3"
+license = "AGPLv3"
+
+keywords = ["languages", "scripting", "script"]
+
+[dependencies]
+gluon_lexer = { workspace = true }
+gluon_debug = { workspace = true }
+
+# Argument parsing helper
+clap = { version = "4.5", features = ["derive", "wrap_help"] }

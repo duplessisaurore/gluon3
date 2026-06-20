@@ -5,7 +5,7 @@ use gluon_debug::Located;
 
 /// A token of some kind lexed from the source code provided with
 /// location information attached
-pub type Token = Located<TokenKind>;
+pub type Token<FileName> = Located<TokenKind, FileName>;
 
 /// A kind of token producable by the `Gluon3` Lexer.
 ///

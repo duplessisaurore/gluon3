@@ -14,40 +14,45 @@
 #![warn(clippy::pedantic)]
 #![no_std]
 
-use alloc::{rc::Rc, string::String};
+use core::fmt::Display;
+
+use alloc::{
+    rc::Rc,
+    string::{String, ToString},
+};
 
 extern crate alloc;
 
 /// A source file which points to some file on disk
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceFile {
-    pub filename: String,
+pub struct SourceFile<FileName: Display> {
+    pub filename: FileName,
 }
 
 /// A source location in a file
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceLocation {
-    pub file: Rc<SourceFile>,
+pub struct SourceLocation<FileName: Display> {
+    pub file: Rc<SourceFile<FileName>>,
     pub span: Span,
 }
 
-impl SourceLocation {
+impl<FileName: Display> SourceLocation<FileName> {
     #[must_use]
-    pub fn new(file: Rc<SourceFile>, span: Span) -> Self {
+    pub fn new(file: Rc<SourceFile<FileName>>, span: Span) -> Self {
         Self { file, span }
     }
 
     #[must_use]
-    pub fn filename(&self) -> &str {
-        self.file.filename.as_str()
+    pub fn filename(&self) -> String {
+        self.file.filename.to_string()
     }
 }
 
 /// Attach some location information onto a type
 #[derive(Debug, Clone)]
-pub struct Located<T: Clone> {
+pub struct Located<T: Clone, FileName: Display> {
     pub kind: T,
-    pub location: SourceLocation,
+    pub location: SourceLocation<FileName>,
 }
 
 /// Span of byte offsets into the source file that
@@ -58,7 +63,7 @@ pub struct Span {
     pub end: usize,
 }
 
-impl SourceLocation {
+impl<FileName: Display> SourceLocation<FileName> {
     #[must_use]
     pub fn new_span_in_file(&self, span: Span) -> Self {
         Self {
@@ -78,7 +83,7 @@ impl Span {
     }
 }
 
-impl<T: Clone> Located<T> {
+impl<T: Clone, FileName: Display> Located<T, FileName> {
     pub fn span(&self) -> Span {
         self.location.span
     }

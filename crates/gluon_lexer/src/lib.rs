@@ -20,6 +20,8 @@ extern crate alloc;
 ///
 /// This defines all the token types
 pub mod tokens;
+pub use tokens::Token;
+pub use tokens::TokenKind;
 
 /// The lexer type which can be used to produce the tokens
 /// described.
@@ -27,3 +29,8 @@ pub mod tokens;
 /// This takes in the textual string input and produces
 /// the tokens as the output in a list.
 pub mod lexer;
+pub use lexer::Lexer;
+
+/// Error types/result that can occur during lexing
+pub mod errors;
+pub use errors::LexError;

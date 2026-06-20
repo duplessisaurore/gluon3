@@ -3,12 +3,15 @@
 //! This translates the source file content into the tokens
 //! specified by `TokenKind` for one source
 
-use core::str::Chars;
+use core::{fmt::Display, str::Chars};
 
 use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 
-use crate::tokens::{Token, TokenKind};
+use crate::{
+    errors::{LexError, LexResult},
+    tokens::{Token, TokenKind},
+};
 
 /// Modes that the `Lexer` can operate in a stack
 /// to handle nested contexts for differing parts of the
@@ -57,7 +60,7 @@ enum LexerMode {
 ///
 /// This dictates the current execution "mode", see
 /// `LexerMode` for explanation on each mode.
-pub struct Lexer<'src> {
+pub struct Lexer<'src, FileName: Display> {
     /// The source file content we are currently lexing
     ///
     /// We need to keep this around for calculating the
@@ -73,7 +76,7 @@ pub struct Lexer<'src> {
 
     /// The source file to track from which the contents
     /// to lex came from
-    file: Rc<SourceFile>,
+    file: Rc<SourceFile<FileName>>,
 
     /// Mode stack for tracking the current mode the lexer is
     /// in, will always have at least one mode (`Mode::Normal`) at
@@ -81,62 +84,7 @@ pub struct Lexer<'src> {
     modes: Vec<LexerMode>,
 }
 
-/// Result of one step of the lexing process, this is just a convenience
-/// over having to write Result<Token, `LexError`> everywhere if the token
-/// type needs to change or something.
-pub type LexResult = Result<Token, LexError>;
-
-/// Errors that can occur while lexing.
-#[derive(Debug, Clone, PartialEq)]
-pub enum LexError {
-    /// An unterminated string literal
-    ///
-    /// hit EOF before the closing `"`.
-    UnterminatedString { start: Span },
-
-    /// An unterminated macro quote
-    ///
-    /// hit EOF before the closing ``` `` ```.
-    UnterminatedQuote { start: Span },
-
-    /// An unterminated macro quote
-    ///
-    /// hit EOF before the closing `)`.
-    UnterminatedSplice { start: Span },
-
-    /// An unterminated string interpolation
-    ///
-    /// hit EOF before the closing `}`.
-    UnterminatedInterp { start: Span },
-
-    /// An unterminated open `LBracket` `{`
-    ///
-    /// hit EOF before the closing `}`.
-    UnterminatedLBrace { start: Span },
-
-    /// An unterminated open `LParen` `(`
-    ///
-    /// hit EOF before the closing `)`.
-    UnterminatedLParen { start: Span },
-
-    /// A `}` was seen that doesn't close anything currently open
-    UnmatchedRBrace { at: Span },
-
-    /// A `)` was seen that doesn't close anything currently open
-    UnmatchedRParen { at: Span },
-
-    /// A numeric literal was malformed and could not be succesfully
-    /// converted to an actual LitUInt/LitInt/LitFloat
-    ///
-    /// The reason for this happening is stored in `reason`.
-    MalformedNumber { at: Span, reason: String },
-
-    /// An escape sequence inside a string was
-    /// not a recognised as a valid escape sequence.
-    InvalidEscape { at: Span },
-}
-
-impl<'src> Lexer<'src> {
+impl<'src, FileName: Display> Lexer<'src, FileName> {
     /// Create a new lexer over `source` that will lex all of the
     /// textual contents into `Tokens`
     ///
@@ -144,7 +92,7 @@ impl<'src> Lexer<'src> {
     /// passed in, and for attached debug information will be stated to have
     /// come from the `file`.
     #[must_use]
-    pub fn new(source: &'src str, file: Rc<SourceFile>) -> Self {
+    pub fn new(source: &'src str, file: Rc<SourceFile<FileName>>) -> Self {
         Self {
             source,
             file,
@@ -156,7 +104,7 @@ impl<'src> Lexer<'src> {
 
     /// Returns a new Located<T> for the kind with a source span in the current
     /// stored file of the `Lexer`.
-    fn make_located<T: Clone>(&self, kind: T, source_span: Span) -> Located<T> {
+    fn make_located<T: Clone>(&self, kind: T, source_span: Span) -> Located<T, FileName> {
         Located {
             kind,
             location: SourceLocation {
@@ -294,11 +242,40 @@ impl<'src> Lexer<'src> {
     /// This may error in many ways!! See `LexError`, generally
     /// if things are unterminated or if there's an invalid literal
     /// or with some garbage on the end of the number
-    pub fn next_token(&mut self) -> LexResult {
+    pub fn next_token(&mut self) -> LexResult<FileName> {
         match self.current_mode() {
             LexerMode::StrTextLiteral { start: _ } => self.lex_str_fragment_or_boundary(),
             _ => self.lex_normal_token(),
         }
+    }
+
+    /// Runs the `Lexer` continuously over the source input
+    /// until EOF is hit or an error occurs, returns all the
+    /// tokens in a Vec
+    ///
+    /// # Errors
+    ///
+    /// This may error in many ways!! See `LexError`, generally
+    /// if things are unterminated or if there's an invalid literal
+    /// or with some garbage on the end of the number
+    pub fn lex_all_tokens(mut self) -> Result<Vec<Token<FileName>>, LexError> {
+        let mut tokens = Vec::new();
+
+        loop {
+            {
+                let token = self.next_token()?;
+
+                match token.kind {
+                    TokenKind::Eof => {
+                        tokens.push(token);
+                        break;
+                    }
+                    _ => tokens.push(token),
+                }
+            }
+        }
+
+        Ok(tokens)
     }
 
     /// Called while the current lexer mode is `Normal`
@@ -312,7 +289,7 @@ impl<'src> Lexer<'src> {
     /// Depth tracking is also done through `Brace`/`Paren` modes that are more
     /// structural than an anctual mode
     #[allow(clippy::too_many_lines)]
-    fn lex_normal_token(&mut self) -> LexResult {
+    fn lex_normal_token(&mut self) -> LexResult<FileName> {
         // Ignore whitespace
         self.skip_whitespace_comments();
         let start = self.current_pos();
@@ -515,7 +492,7 @@ impl<'src> Lexer<'src> {
     ///
     /// Or an `Err(LexError)` when we cant, maybe on an
     /// unresolved Interp or something similar
-    fn lex_eof(&mut self) -> LexResult {
+    fn lex_eof(&mut self) -> LexResult<FileName> {
         let start = self.current_pos();
 
         match self.modes.last() {
@@ -618,7 +595,7 @@ impl<'src> Lexer<'src> {
     ///
     /// After a boundary token, the mode is changed from `StrLit` to either
     /// `StrInterp` or back out of `StrLit` from popping the `StrLit` mode.
-    fn lex_str_fragment_or_boundary(&mut self) -> LexResult {
+    fn lex_str_fragment_or_boundary(&mut self) -> LexResult<FileName> {
         // Start of this string fragment/boundary
         let start = self.current_pos();
 
@@ -703,7 +680,7 @@ impl<'src> Lexer<'src> {
     /// or `.` followed by an ASCII digit.
     ///
     /// See `Fermion3` specification for actual language spec
-    fn lex_number(&mut self) -> LexResult {
+    fn lex_number(&mut self) -> LexResult<FileName> {
         // Start of this number
         let start = self.current_pos();
 
@@ -840,7 +817,7 @@ impl<'src> Lexer<'src> {
     /// the actual `Int`/`UInt` starts.
     ///
     /// `base` is the base of the integer.
-    fn lex_base_int(&mut self, prefix_len: usize, base: u32) -> LexResult {
+    fn lex_base_int(&mut self, prefix_len: usize, base: u32) -> LexResult<FileName> {
         // Grab the current start position for errors that start from here
         let start = self.current_pos();
 
