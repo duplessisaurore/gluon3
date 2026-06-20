@@ -174,11 +174,6 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// The remaining unconsumed source.
-    fn rest(&self) -> &'src str {
-        self.chars.as_str()
-    }
-
     /// Clone the Chars iterator over the string
     /// (this is essentially free!)
     fn clone_chars(&self) -> Chars<'src> {
@@ -327,7 +322,7 @@ impl<'src> Lexer<'src> {
         // Quotes for macros
         if self.try_advance_str("``") {
             // Handle starting new quote or ending quote
-            if matches!(self.current_mode(), LexerMode::Quote { start }) {
+            if matches!(self.current_mode(), LexerMode::Quote { start: _ }) {
                 self.pop_mode();
                 return Ok(self.make_located(TokenKind::MacroQuoteEnd, self.span_from(start)));
             } else {
@@ -487,9 +482,9 @@ impl<'src> Lexer<'src> {
                 }
             }
         }
-
+        
         // Since whitespace, delimiters, macros, strings, and numbers are handled,
-        // above, whatever remains is our idents
+        // above, whatever remains is our idents, keywords or booleans
         let mut text = String::new();
         while let Some(next_c) = self.peek_char() {
             // A reserved character indicates we are at the boundary of our current token
@@ -497,14 +492,14 @@ impl<'src> Lexer<'src> {
                 break;
             }
 
-            // build the ident/kw
+            // build the ident/kw/bool
             text.push(
                 self.advance()
                     .expect("peek_char returned some for next char"),
             );
         }
 
-        Ok(self.make_located(Self::lex_ident_or_keyword(text), self.span_from(start)))
+        Ok(self.make_located(Self::lex_ident_or_keyword_or_boolean(text), self.span_from(start)))
     }
 
     /// Returns either a `Ok(EOF)` when we can safely
@@ -547,20 +542,9 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Attempts to lex the text as a `Bool` literal,
-    /// returning `Some(TokenKind::LitBool(_))` if it is,
-    /// else None
-    fn lex_bool(text: &str) -> Option<TokenKind> {
-        Some(match text {
-            "true" => TokenKind::LitBool(true),
-            "false" => TokenKind::LitBool(false),
-            _ => return None,
-        })
-    }
-
-    /// Attempts to lex the text as a keyword, or otherwise
+    /// Attempts to lex the text as a keyword or boolean, or otherwise
     /// returns the text as a `Token` of the kind `Ident`
-    fn lex_ident_or_keyword(text: String) -> TokenKind {
+    fn lex_ident_or_keyword_or_boolean(text: String) -> TokenKind {
         match text.as_str() {
             "fn" => TokenKind::KwFn,
             "macro" => TokenKind::KwMacro,
@@ -590,6 +574,8 @@ impl<'src> Lexer<'src> {
             "where" => TokenKind::KwWhere,
             "fail" => TokenKind::KwFail,
             "defer" => TokenKind::KwDefer,
+            "true" => TokenKind::LitBool(true),
+            "false" => TokenKind::LitBool(false),
             _ => TokenKind::Ident(text),
         }
     }
