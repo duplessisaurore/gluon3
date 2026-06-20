@@ -1,0 +1,16 @@
+[package]
+name = "gluon_parser"
+version = "1.0.0"
+edition = "2024"
+authors = ["The Gluon3 Contributors"]
+
+description = "The Gluon3 compilers's parser which takes the tokens from the lexer and turns it into an Abstract Syntax Tree"
+readme = "README.md"
+
+repository = "https://github.com/duplessisaurore/gluon3"
+license = "AGPLv3"
+
+keywords = ["languages", "scripting", "script"]
+
+[dependencies]
+gluon_debug = { workspace = true }

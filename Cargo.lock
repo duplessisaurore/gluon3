@@ -127,6 +127,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gluon_parser"
+version = "1.0.0"
+dependencies = [
+ "gluon_debug",
+]
+
+[[package]]
 name = "gluon_std"
 version = "1.0.0"
 dependencies = [
