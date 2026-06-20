@@ -252,12 +252,12 @@ pub enum TokenKind {
 
     /// Start of a quote in a macro
     /// 
-    /// '{
+    /// ``
     MacroQuoteStart,
 
     /// End of a quote of a macro 
     /// 
-    /// }
+    /// ``
     MacroQuoteEnd,
 
     /// Start of a splice in a macro quote
