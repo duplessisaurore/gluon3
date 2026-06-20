@@ -327,7 +327,26 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Skips whitespace and comments
+    /// from the current position in the `Lexer`'s cursor.
+    fn skip_whitespace_comments(&mut self) {
+        loop {
+            match self.peek_char() {
+                Some(c) if c.is_whitespace() => {
+                    self.advance();
+                }
+                Some('/') if self.peek_char_nth(1) == Some('/') => {
 
+                    // Advance until the next new line
+                    while let Some(c) = self.peek_char() {
+                        if c == '\n' { break; }
+                        self.advance();
+                    }
+                }
+                _ => break,
+            }
+        }
+    }
      
     /// Called while the current lexer mode is `StrLit`
     /// 
