@@ -8,79 +8,78 @@ use gluon_debug::Located;
 pub type Token = Located<TokenKind>;
 
 /// A kind of token producable by the `Gluon3` Lexer.
-/// 
+///
 /// This supports all the `Fermion3` language features excluding
 /// macros.
-/// 
+///
 /// Each token is categorised by the first few letters as follows:
-/// 
+///
 ///     All non-string literals begin with `Lit`.
 ///     All string-literal related tokens (including interp) start with `Str`
 ///     All keywords start with `Kw`'
 ///     All delimiters start with `Del`
 ///     All macro related (non-keywords) start with `Macro`
-/// 
+///
 /// Other elements do not really have a category.
 ///     
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
-    // = Literals (Lit) = 
-
+    // = Literals (Lit) =
     /// Integer literals
     /// ------------------
-    /// 
+    ///
     /// As per the specification this can come from:
-    /// 
-    /// decimal, 
-    /// hex (0x), 
-    /// binary (0b), 
+    ///
+    /// decimal,
+    /// hex (0x),
+    /// binary (0b),
     /// octal (0o)
-    /// 
+    ///
     /// Stored as i64 after parsing the prefix/base
     LitInt(i64),
 
     /// Unsigned Integer literals
     /// ------------------
-    /// 
+    ///
     /// As per the specification this can come from:
-    /// 
-    /// decimal, 
-    /// hex (0x), 
-    /// binary (0b), 
+    ///
+    /// decimal,
+    /// hex (0x),
+    /// binary (0b),
     /// octal (0o)
-    /// 
+    ///
     /// all followed by a "u", to differentiate from normal
     /// integer literals. This does not support negative numbers.
-    /// 
+    ///
     /// Stored as u64 after parsing the prefix/base
     LitUInt(u64),
 
     /// Floating point literal
     /// ------------------
-    /// 
+    ///
     /// As per the specification this can come from:
-    /// 
+    ///
     /// decimal.fractional
     /// .fractional
     /// decimal.
     /// any of the above follwoed by an "e<places>"
-    /// 
+    ///
     /// Stored as an f64 after parsing the prefix/base.
     LitFloat(f64),
 
     /// Boolean literal
     /// ------------------
-    /// 
+    ///
     /// Allowed:
     /// true / false in any case.
-    /// 
+    ///
     LitBool(bool),
 
     /// Unit literal: ()
     LitUnit,
 
     // = String Literals (Str) =
-    // 
+    //
     // This needs to support interpolation too which is done through a complex
     // sequence of tokens.
     //
@@ -89,7 +88,7 @@ pub enum TokenKind {
     //
     // For example with "hello world":
     // StrStart, StrFragment("hello world"), StrEnd
-    // 
+    //
     // An interpolated string produces a sequence in which
     // consists of StrFragments and then StrInterpStart/StrInterpEnd sequences
     // which contains the normal tokens in the "interpolation region"
@@ -109,9 +108,8 @@ pub enum TokenKind {
     // StrFragment(" years old")
     // StrEnd
     //
-
     /// Opens a string literal
-    /// 
+    ///
     /// This should be done when the lexer sees the opening double quote '"'
     StrStart,
 
@@ -121,23 +119,22 @@ pub enum TokenKind {
     StrFragment(String),
 
     /// Opens an interpolation inside a string literal
-    /// 
+    ///
     /// This should be done when the lexer sees `${`
     StrInterpStart,
 
     /// Closes an interpolation
-    /// 
+    ///
     /// This should be done when the lexer sees `}` that
     /// terminates an interpolation
     StrInterpEnd,
 
     /// Opens a string literal
-    /// 
+    ///
     /// This should be done when the lexer sees the closing double quote '"'
     StrEnd,
 
     // = Keywords (Kw) =
-
     /// Function definition
     KwFn,
 
@@ -197,19 +194,18 @@ pub enum TokenKind {
 
     /// Add methods to a type
     KwWith,
-    
+
     /// Guard for a type
     KwWhere,
 
     /// Guard message on fail
     KwFail,
-    
+
     /// Defer an expression to be evaluated later
     KwDefer,
 
     //  = Identifiers and Operators =
-
-    /// Any identifier that is not a keyword: 
+    /// Any identifier that is not a keyword:
     /// variable names, type names, etc.
     Ident(String),
 
@@ -217,25 +213,22 @@ pub enum TokenKind {
 
     // Compound assignment consists of some
     // ident ident= ident
-    Equal,        // =
+    Equal, // =
 
     // = Special Operators =
-
-    FatArrow,    // =>  (function body / match arm)
-    ThinArrow,   // ->  (return type annotation / function type)
-    PipeArrow,   // |>  (pipeline operator)
-    DotDot,      // ..  (slice range)
-    DotDotDot,   // ... (spread operator)
+    FatArrow,  // =>  (function body / match arm)
+    ThinArrow, // ->  (return type annotation / function type)
+    PipeArrow, // |>  (pipeline operator)
+    DotDot,    // ..  (slice range)
+    DotDotDot, // ... (spread operator)
 
     // = Punctuation =
-
     Dot,       // .
     Comma,     // ,
     Colon,     // :
     Semicolon, // ;
 
     // = Delimiters ==
-
     DelLParen,   // (
     DelRParen,   // )
     DelLBrace,   // {
@@ -245,39 +238,42 @@ pub enum TokenKind {
 
     // Open/close a parametric type delimiter
     // This is context sensitive with the operator Less/Greater
-    DelLAngle,   // <
-    DelRAngle,   // >
+    DelLAngle, // <
+    DelRAngle, // >
 
     // = Macros (Macro) =
-
     /// Start of a quote in a macro
-    /// 
+    ///
+    /// ```
     /// ``
+    /// ```
     MacroQuoteStart,
 
-    /// End of a quote of a macro 
-    /// 
+    /// End of a quote of a macro
+    ///
+    /// ```
     /// ``
+    /// ```
     MacroQuoteEnd,
 
     /// Start of a splice in a macro quote
     /// This is like string interpolation but macros
-    /// 
+    ///
     /// $(
     MacroSpliceStart,
 
     /// End of a macro splice in a quote )
     MacroSpliceEnd,
 
-    /// @ For macro invocation compared 
+    /// @ For macro invocation compared
     /// to normal function names as idents
     MacroAt,
 
     /// # For #name hygiene escape in macros
     /// which lets you do
-    /// 
+    ///
     /// let #it = $(cond)..
-    /// 
+    ///
     /// and then "it" will be actually produced in
     /// the output for the macro
     MacroHash,

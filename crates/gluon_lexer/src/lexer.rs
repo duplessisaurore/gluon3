@@ -21,7 +21,7 @@ enum LexerMode {
 
     /// Inside the "text literal" region of a string literal
     /// this is between the opening `"` and any `${...}` boundaries
-    /// and the closing `"` which should just be tokenised as StrFragment
+    /// and the closing `"` which should just be tokenised as `StrFragment`
     StrTextLiteral { start: usize },
 
     /// Inside the interpolation region of a string literal
@@ -29,7 +29,11 @@ enum LexerMode {
     StrInterp { start: usize },
 
     /// Inside a macro's quote region which is marked by the
-    /// ``` ``...`` ``` symbols (double "`")
+    /// quote symbols:
+    ///
+    /// ```
+    /// ``
+    /// ```
     Quote { start: usize },
 
     /// Inside a `$( ... )` macro splice region which is similar to
@@ -59,7 +63,7 @@ pub struct Lexer<'src> {
     /// We need to keep this around for calculating the
     /// offset into the file while leveraging Chars
     ///
-    /// We cant use CharIndicies since slicing with that
+    /// We cant use `CharIndicies` since slicing with that
     /// doesnt really work nicely with the actual offsets
     /// into the source
     source: &'src str,
@@ -72,13 +76,13 @@ pub struct Lexer<'src> {
     file: Rc<SourceFile>,
 
     /// Mode stack for tracking the current mode the lexer is
-    /// in, will always have at least one mode (Mode::Normal) at
+    /// in, will always have at least one mode (`Mode::Normal`) at
     /// the bottom.
     modes: Vec<LexerMode>,
 }
 
 /// Result of one step of the lexing process, this is just a convenience
-/// over having to write Result<Token, LexError> everywhere if the token
+/// over having to write Result<Token, `LexError`> everywhere if the token
 /// type needs to change or something.
 pub type LexResult = Result<Token, LexError>;
 
@@ -105,12 +109,12 @@ pub enum LexError {
     /// hit EOF before the closing `}`.
     UnterminatedInterp { start: Span },
 
-    /// An unterminated open LBracket `{`
+    /// An unterminated open `LBracket` `{`
     ///
     /// hit EOF before the closing `}`.
     UnterminatedLBrace { start: Span },
 
-    /// An unterminated open LParen `(`
+    /// An unterminated open `LParen` `(`
     ///
     /// hit EOF before the closing `)`.
     UnterminatedLParen { start: Span },
@@ -139,6 +143,7 @@ impl<'src> Lexer<'src> {
     /// All of these tokens will be assumed to have come from the `file`
     /// passed in, and for attached debug information will be stated to have
     /// come from the `file`.
+    #[must_use]
     pub fn new(source: &'src str, file: Rc<SourceFile>) -> Self {
         Self {
             source,
@@ -212,15 +217,15 @@ impl<'src> Lexer<'src> {
     /// Essentially tries to advance the cursor
     /// by some &str and returns the result as true/false
     fn try_advance_str(&mut self, s: &str) -> bool {
-        let rest = self.chars.as_str();
-        if rest.starts_with(s) {
+        let from_current = self.chars.as_str();
+        if let Some(remaining) = from_current.strip_prefix(s) {
             // Fast forward the iterator by slicing the remaining string
             // and re-charsing it.
             //
             // This is why we cant use CharsIndices because the indices would
             // come from the new slice instead of the source, but chars lets
             // us do it yippie!!!
-            self.chars = rest[s.len()..].chars();
+            self.chars = remaining.chars();
             true
         } else {
             false
@@ -283,9 +288,9 @@ impl<'src> Lexer<'src> {
 
     /// Runs the `Lexer` once to attempt to produce
     /// the next `Token` depending on the current mode.
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// This may error in many ways!! See `LexError`, generally
     /// if things are unterminated or if there's an invalid literal
     /// or with some garbage on the end of the number
@@ -306,6 +311,7 @@ impl<'src> Lexer<'src> {
     ///
     /// Depth tracking is also done through `Brace`/`Paren` modes that are more
     /// structural than an anctual mode
+    #[allow(clippy::too_many_lines)]
     fn lex_normal_token(&mut self) -> LexResult {
         // Ignore whitespace
         self.skip_whitespace_comments();
@@ -325,10 +331,9 @@ impl<'src> Lexer<'src> {
             if matches!(self.current_mode(), LexerMode::Quote { start: _ }) {
                 self.pop_mode();
                 return Ok(self.make_located(TokenKind::MacroQuoteEnd, self.span_from(start)));
-            } else {
-                self.push_mode(LexerMode::Quote { start });
-                return Ok(self.make_located(TokenKind::MacroQuoteStart, self.span_from(start)));
             }
+            self.push_mode(LexerMode::Quote { start });
+            return Ok(self.make_located(TokenKind::MacroQuoteStart, self.span_from(start)));
         }
 
         // Splices for macros
@@ -482,7 +487,7 @@ impl<'src> Lexer<'src> {
                 }
             }
         }
-        
+
         // Since whitespace, delimiters, macros, strings, and numbers are handled,
         // above, whatever remains is our idents, keywords or booleans
         let mut text = String::new();
@@ -499,7 +504,10 @@ impl<'src> Lexer<'src> {
             );
         }
 
-        Ok(self.make_located(Self::lex_ident_or_keyword_or_boolean(text), self.span_from(start)))
+        Ok(self.make_located(
+            Self::lex_ident_or_keyword_or_boolean(text),
+            self.span_from(start),
+        ))
     }
 
     /// Returns either a `Ok(EOF)` when we can safely
@@ -827,7 +835,7 @@ impl<'src> Lexer<'src> {
 
     /// Lexes some `Int` or `UInt` at the current position
     ///
-    /// prefix_len is the number of elements to skip in the prefix as part
+    /// `prefix_len` is the number of elements to skip in the prefix as part
     /// of this base, for example `0x` has 2 elements in the prefix before
     /// the actual `Int`/`UInt` starts.
     ///
@@ -894,7 +902,7 @@ impl<'src> Lexer<'src> {
     /// Check that there is no trailing garbage (non-reserved/whitespace)
     /// following this number
     ///
-    /// Returns Ok(()) if there is none else a LexError.
+    /// Returns Ok(()) if there is none else a `LexError`.
     fn check_trailing_garbage(
         &mut self,
         start: usize,

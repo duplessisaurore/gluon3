@@ -1,4 +1,4 @@
-//! `Gluon3` is an experimental free and open-source compiler for the `Fermion3` 
+//! `Gluon3` is an experimental free and open-source compiler for the `Fermion3`
 //! language that translates `Fermion3` into the more textual assembly language `Quark3`.
 //!
 //! Check out the [repository README](https://github.com/duplessisaurore/gluon3/blob/main/README.md)
@@ -17,13 +17,13 @@
 extern crate alloc;
 
 /// The output of the lexer, the tokens themselves.
-/// 
+///
 /// This defines all the token types
 pub mod tokens;
 
 /// The lexer type which can be used to produce the tokens
 /// described.
-/// 
+///
 /// This takes in the textual string input and produces
 /// the tokens as the output in a list.
 pub mod lexer;
