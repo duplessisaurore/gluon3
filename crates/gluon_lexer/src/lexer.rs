@@ -60,7 +60,7 @@ enum LexerMode {
 ///
 /// This dictates the current execution "mode", see
 /// `LexerMode` for explanation on each mode.
-pub struct Lexer<'src, FileName: Display> {
+pub struct Lexer<'src, FileName: Display + Clone> {
     /// The source file content we are currently lexing
     ///
     /// We need to keep this around for calculating the
@@ -84,7 +84,7 @@ pub struct Lexer<'src, FileName: Display> {
     modes: Vec<LexerMode>,
 }
 
-impl<'src, FileName: Display> Lexer<'src, FileName> {
+impl<'src, FileName: Display + Clone> Lexer<'src, FileName> {
     /// Create a new lexer over `source` that will lex all of the
     /// textual contents into `Tokens`
     ///

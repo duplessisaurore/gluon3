@@ -25,18 +25,18 @@ extern crate alloc;
 
 /// A source file which points to some file on disk
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceFile<FileName: Display> {
+pub struct SourceFile<FileName: Display + Clone> {
     pub filename: FileName,
 }
 
 /// A source location in a file
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceLocation<FileName: Display> {
+pub struct SourceLocation<FileName: Display+ Clone> {
     pub file: Rc<SourceFile<FileName>>,
     pub span: Span,
 }
 
-impl<FileName: Display> SourceLocation<FileName> {
+impl<FileName: Display + Clone> SourceLocation<FileName> {
     #[must_use]
     pub fn new(file: Rc<SourceFile<FileName>>, span: Span) -> Self {
         Self { file, span }
@@ -50,7 +50,7 @@ impl<FileName: Display> SourceLocation<FileName> {
 
 /// Attach some location information onto a type
 #[derive(Debug, Clone)]
-pub struct Located<T: Clone, FileName: Display> {
+pub struct Located<T: Clone, FileName: Display + Clone> {
     pub kind: T,
     pub location: SourceLocation<FileName>,
 }
@@ -63,7 +63,7 @@ pub struct Span {
     pub end: usize,
 }
 
-impl<FileName: Display> SourceLocation<FileName> {
+impl<FileName: Display + Clone> SourceLocation<FileName > {
     #[must_use]
     pub fn new_span_in_file(&self, span: Span) -> Self {
         Self {
@@ -83,7 +83,7 @@ impl Span {
     }
 }
 
-impl<T: Clone, FileName: Display> Located<T, FileName> {
+impl<T: Clone, FileName: Display + Clone> Located<T, FileName> {
     pub fn span(&self) -> Span {
         self.location.span
     }
