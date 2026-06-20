@@ -84,7 +84,7 @@ pub struct Lexer<'src, FileName: Display + Clone> {
     modes: Vec<LexerMode>,
 }
 
-impl<'src, FileName: Display + Clone> Lexer<'src, FileName> {
+impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
     /// Create a new lexer over `source` that will lex all of the
     /// textual contents into `Tokens`
     ///
@@ -104,7 +104,7 @@ impl<'src, FileName: Display + Clone> Lexer<'src, FileName> {
 
     /// Returns a new Located<T> for the kind with a source span in the current
     /// stored file of the `Lexer`.
-    fn make_located<T: Clone>(&self, kind: T, source_span: Span) -> Located<T, FileName> {
+    fn make_located<T: Clone + PartialEq>(&self, kind: T, source_span: Span) -> Located<T, FileName> {
         Located {
             kind,
             location: SourceLocation {

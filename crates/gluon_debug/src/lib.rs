@@ -49,8 +49,8 @@ impl<FileName: Display + Clone> SourceLocation<FileName> {
 }
 
 /// Attach some location information onto a type
-#[derive(Debug, Clone)]
-pub struct Located<T: Clone, FileName: Display + Clone> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Located<T: Clone + PartialEq, FileName: Display + Clone + PartialEq> {
     pub kind: T,
     pub location: SourceLocation<FileName>,
 }
@@ -83,7 +83,7 @@ impl Span {
     }
 }
 
-impl<T: Clone, FileName: Display + Clone> Located<T, FileName> {
+impl<T: Clone + PartialEq, FileName: Display + Clone + PartialEq> Located<T, FileName> {
     pub fn span(&self) -> Span {
         self.location.span
     }
