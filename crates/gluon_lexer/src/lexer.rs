@@ -3,7 +3,7 @@
 //! This translates the source file content into the tokens
 //! specified by `TokenKind` for one source
 
-use core::{iter::Peekable, str::Chars};
+use core::str::Chars;
 
 use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
@@ -22,27 +22,27 @@ enum LexerMode {
     /// Inside the "text literal" region of a string literal
     /// this is between the opening `"` and any `${...}` boundaries
     /// and the closing `"` which should just be tokenised as StrFragment
-    StrTextLiteral,
+    StrTextLiteral { start: usize },
 
     /// Inside the interpolation region of a string literal
     /// which is marked by the `${...}` symbols.
-    StrInterp,
+    StrInterp { start: usize },
 
     /// Inside a macro's quote region which is marked by the
     /// ``` ``...`` ``` symbols (double "`")
-    Quote,
+    Quote { start: usize },
 
     /// Inside a `$( ... )` macro splice region which is similar to
     /// string interpolation but for macro quotes.
-    Splice,
+    Splice { start: usize },
 
     /// Inside a block/`{...}` bracket region, this is structural
     /// tracking for keeping nested depth
-    Brace,
+    Brace { start: usize },
 
     /// Inside a parenthesis/`(...)` region, this is structural
     /// tracking for keeping nested depth
-    Paren,
+    Paren { start: usize },
 }
 
 /// The actual lexer class itself
@@ -105,6 +105,16 @@ pub enum LexError {
     /// hit EOF before the closing `}`.
     UnterminatedInterp { start: Span },
 
+    /// An unterminated open LBracket `{`
+    ///
+    /// hit EOF before the closing `}`.
+    UnterminatedLBrace { start: Span },
+
+    /// An unterminated open LParen `(`
+    ///
+    /// hit EOF before the closing `)`.
+    UnterminatedLParen { start: Span },
+
     /// A `}` was seen that doesn't close anything currently open
     UnmatchedRBrace { at: Span },
 
@@ -116,10 +126,6 @@ pub enum LexError {
     ///
     /// The reason for this happening is stored in `reason`.
     MalformedNumber { at: Span, reason: String },
-
-    /// An unknown/unexpected byte that doesn't start any valid
-    /// token at this point and should not be there.
-    UnexpectedChar { at: Span },
 
     /// An escape sequence inside a string was
     /// not a recognised as a valid escape sequence.
@@ -280,6 +286,267 @@ impl<'src> Lexer<'src> {
         )
     }
 
+    /// Runs the `Lexer` once to attempt to produce
+    /// the next `Token` depending on the current mode.
+    /// 
+    /// # Errors
+    /// 
+    /// This may error in many ways!! See `LexError`, generally
+    /// if things are unterminated or if there's an invalid literal
+    /// or with some garbage on the end of the number
+    pub fn next_token(&mut self) -> LexResult {
+        match self.current_mode() {
+            LexerMode::StrTextLiteral { start: _ } => self.lex_str_fragment_or_boundary(),
+            _ => self.lex_normal_token(),
+        }
+    }
+
+    /// Called while the current lexer mode is `Normal`
+    ///
+    /// Attempts to lex the next bit of input content as a `Token` depending
+    /// on the current mode the lexer is in (any but `StrLit`).
+    ///
+    /// This may also change the mode stack of the `Lexer` depending
+    /// on whether or we are in a `StrInterp`, `Quote` or `Splice`.
+    ///
+    /// Depth tracking is also done through `Brace`/`Paren` modes that are more
+    /// structural than an anctual mode
+    fn lex_normal_token(&mut self) -> LexResult {
+        // Ignore whitespace
+        self.skip_whitespace_comments();
+        let start = self.current_pos();
+
+        // check if we hit the end?
+        let Some(c) = self.peek_char() else {
+            return self.lex_eof();
+        };
+
+        // First we need to handle everything that can
+        // change the current mode before we lex normal tokens.
+
+        // Quotes for macros
+        if self.try_advance_str("``") {
+            // Handle starting new quote or ending quote
+            if matches!(self.current_mode(), LexerMode::Quote { start }) {
+                self.pop_mode();
+                return Ok(self.make_located(TokenKind::MacroQuoteEnd, self.span_from(start)));
+            } else {
+                self.push_mode(LexerMode::Quote { start });
+                return Ok(self.make_located(TokenKind::MacroQuoteStart, self.span_from(start)));
+            }
+        }
+
+        // Splices for macros
+        if self.try_advance_str("$(") {
+            // The close token is a normal `)`
+            // where we need to handle Paren/Splice
+            self.push_mode(LexerMode::Splice { start });
+            return Ok(self.make_located(TokenKind::MacroSpliceStart, self.span_from(start)));
+        }
+
+        // NOTE:
+        // for any multi-character sequence we must lex the longest
+        // first before the shortest, e.g spread before slice before access/.
+
+        if self.try_advance_str("=>") {
+            return Ok(self.make_located(TokenKind::FatArrow, self.span_from(start)));
+        }
+
+        if self.try_advance_str("->") {
+            return Ok(self.make_located(TokenKind::ThinArrow, self.span_from(start)));
+        }
+
+        if self.try_advance_str("...") {
+            return Ok(self.make_located(TokenKind::DotDotDot, self.span_from(start)));
+        }
+
+        if self.try_advance_str("..") {
+            return Ok(self.make_located(TokenKind::DotDot, self.span_from(start)));
+        }
+
+        if self.try_advance_str("|>") {
+            return Ok(self.make_located(TokenKind::PipeArrow, self.span_from(start)));
+        }
+
+        // Check if we are entering a StrLiteral section.
+        if self.try_advance_str("\"") {
+            self.push_mode(LexerMode::StrTextLiteral { start });
+            return Ok(self.make_located(TokenKind::StrStart, self.span_from(start)));
+        }
+
+        // Try lex numbers now since "." falls in normal punctuation (lexxed below)
+        // but we want to try grab numbers first
+        //
+        // See comment of `lex_number` for required conditions for being maybe a number.
+        if self.peek_char().is_some_and(|c| c.is_ascii_digit())
+            || (self.peek_char() == Some('.')
+                && self.peek_char_nth(1).is_some_and(|d| d.is_ascii_digit()))
+        {
+            return self.lex_number();
+        }
+
+        if c == '@' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::MacroAt, self.span_from(start)));
+        }
+        if c == '#' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::MacroHash, self.span_from(start)));
+        }
+        if c == '=' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Equal, self.span_from(start)));
+        }
+        if c == '.' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Dot, self.span_from(start)));
+        }
+        if c == ',' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Comma, self.span_from(start)));
+        }
+        if c == ':' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Colon, self.span_from(start)));
+        }
+        if c == ';' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Semicolon, self.span_from(start)));
+        }
+        if c == '[' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::DelLBracket, self.span_from(start)));
+        }
+        if c == ']' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::DelRBracket, self.span_from(start)));
+        }
+        if c == '<' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::DelLAngle, self.span_from(start)));
+        }
+        if c == '>' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::DelRAngle, self.span_from(start)));
+        }
+
+        // Delimiters (need mode structural tracking/handling Interp/Slice)
+
+        // Open { is handled in `StrTextLiteral` mode.
+        if c == '{' {
+            self.advance();
+            self.push_mode(LexerMode::Brace { start });
+            return Ok(self.make_located(TokenKind::DelLBrace, self.span_from(start)));
+        }
+        if c == '}' {
+            self.advance();
+            match self.current_mode() {
+                // Close either the structural tracking or StrInterp
+                LexerMode::StrInterp { start: _ } => {
+                    self.pop_mode();
+                    return Ok(self.make_located(TokenKind::StrInterpEnd, self.span_from(start)));
+                }
+                LexerMode::Brace { start: _ } => {
+                    self.pop_mode();
+                    return Ok(self.make_located(TokenKind::DelRBrace, self.span_from(start)));
+                }
+
+                // Doesn't close anything... weird
+                _ => {
+                    return Err(LexError::UnmatchedRBrace {
+                        at: self.span_from(start),
+                    });
+                }
+            }
+        }
+
+        // same for parenthesis....
+        if c == '(' {
+            self.advance();
+            self.push_mode(LexerMode::Paren { start });
+            return Ok(self.make_located(TokenKind::DelLParen, self.span_from(start)));
+        }
+        if c == ')' {
+            self.advance();
+            match self.current_mode() {
+                // Close either the structural tracking or Splice
+                LexerMode::Splice { start: _ } => {
+                    self.pop_mode();
+                    return Ok(self.make_located(TokenKind::MacroSpliceEnd, self.span_from(start)));
+                }
+                LexerMode::Paren { start: _ } => {
+                    self.pop_mode();
+                    return Ok(self.make_located(TokenKind::DelRParen, self.span_from(start)));
+                }
+
+                // Doesn't close anything... weird
+                _ => {
+                    return Err(LexError::UnmatchedRParen {
+                        at: self.span_from(start),
+                    });
+                }
+            }
+        }
+
+        // Since whitespace, delimiters, macros, strings, and numbers are handled,
+        // above, whatever remains is our idents
+        let mut text = String::new();
+        while let Some(next_c) = self.peek_char() {
+            // A reserved character indicates we are at the boundary of our current token
+            if next_c.is_whitespace() || Self::is_reserved(next_c) {
+                break;
+            }
+
+            // build the ident/kw
+            text.push(
+                self.advance()
+                    .expect("peek_char returned some for next char"),
+            );
+        }
+
+        Ok(self.make_located(Self::lex_ident_or_keyword(text), self.span_from(start)))
+    }
+
+    /// Returns either a `Ok(EOF)` when we can safely
+    /// end the lexing/file here.
+    ///
+    /// Or an `Err(LexError)` when we cant, maybe on an
+    /// unresolved Interp or something similar
+    fn lex_eof(&mut self) -> LexResult {
+        let start = self.current_pos();
+
+        match self.modes.last() {
+            Some(mode) => match mode {
+                // At the root/normal mode, not nested anywhere, all okay :)
+                LexerMode::Normal => Ok(self.make_located(TokenKind::Eof, self.span_from(start))),
+
+                // Unterminated string literal, shouldnt reach this branch
+                // but just in case.
+                LexerMode::StrTextLiteral { start } => Err(LexError::UnterminatedString {
+                    start: self.span_from(*start),
+                }),
+
+                // Other unterminated modoes
+                LexerMode::StrInterp { start } => Err(LexError::UnterminatedInterp {
+                    start: self.span_from(*start),
+                }),
+                LexerMode::Quote { start } => Err(LexError::UnterminatedQuote {
+                    start: self.span_from(*start),
+                }),
+                LexerMode::Splice { start } => Err(LexError::UnterminatedSplice {
+                    start: self.span_from(*start),
+                }),
+                LexerMode::Brace { start } => Err(LexError::UnterminatedLBrace {
+                    start: self.span_from(*start),
+                }),
+                LexerMode::Paren { start } => Err(LexError::UnterminatedLParen {
+                    start: self.span_from(*start),
+                }),
+            },
+            None => panic!("This should be impossible! Somewhere popped more modes than pushed"),
+        }
+    }
+
     /// Attempts to lex the text as a `Bool` literal,
     /// returning `Some(TokenKind::LitBool(_))` if it is,
     /// else None
@@ -293,8 +560,8 @@ impl<'src> Lexer<'src> {
 
     /// Attempts to lex the text as a keyword, or otherwise
     /// returns the text as a `Token` of the kind `Ident`
-    fn lex_ident_or_keyword(text: &str) -> TokenKind {
-        match text {
+    fn lex_ident_or_keyword(text: String) -> TokenKind {
+        match text.as_str() {
             "fn" => TokenKind::KwFn,
             "macro" => TokenKind::KwMacro,
             "let" => TokenKind::KwLet,
@@ -323,7 +590,7 @@ impl<'src> Lexer<'src> {
             "where" => TokenKind::KwWhere,
             "fail" => TokenKind::KwFail,
             "defer" => TokenKind::KwDefer,
-            other => TokenKind::Ident(String::from(other)),
+            _ => TokenKind::Ident(text),
         }
     }
 
@@ -336,10 +603,11 @@ impl<'src> Lexer<'src> {
                     self.advance();
                 }
                 Some('/') if self.peek_char_nth(1) == Some('/') => {
-
                     // Advance until the next new line
                     while let Some(c) = self.peek_char() {
-                        if c == '\n' { break; }
+                        if c == '\n' {
+                            break;
+                        }
                         self.advance();
                     }
                 }
@@ -347,20 +615,20 @@ impl<'src> Lexer<'src> {
             }
         }
     }
-     
+
     /// Called while the current lexer mode is `StrLit`
-    /// 
-    /// Scans either a `StrFragment` of plain text with escapes resolved, 
+    ///
+    /// Scans either a `StrFragment` of plain text with escapes resolved,
     /// or a boundary token such as a `StrInterpStart` on seeing `${`, or
     /// a `StrEnd` on seeing the closing `"`.
-    /// 
+    ///
     /// After a boundary token, the mode is changed from `StrLit` to either
     /// `StrInterp` or back out of `StrLit` from popping the `StrLit` mode.
     fn lex_str_fragment_or_boundary(&mut self) -> LexResult {
         // Start of this string fragment/boundary
         let start = self.current_pos();
 
-        // Check boundaries first before we greedly 
+        // Check boundaries first before we greedly
         // grab into a `StrFragment`
 
         // End of string
@@ -371,13 +639,15 @@ impl<'src> Lexer<'src> {
 
         // Start of a StrInterp
         if self.try_advance_str("${") {
-            self.push_mode(LexerMode::StrInterp);
+            self.push_mode(LexerMode::StrInterp { start });
             return Ok(self.make_located(TokenKind::StrInterpStart, self.span_from(start)));
         }
-        
+
         // hit EOF before string terminated
         if self.peek_char().is_none() {
-            return Err(LexError::UnterminatedString { start: self.span_from(start) });
+            return Err(LexError::UnterminatedString {
+                start: self.span_from(start),
+            });
         }
 
         // Greedly eat this as a `StrFragment`
@@ -386,7 +656,9 @@ impl<'src> Lexer<'src> {
         loop {
             match self.peek_char() {
                 None => {
-                    return Err(LexError::UnterminatedString { start: self.span_from(start) });
+                    return Err(LexError::UnterminatedString {
+                        start: self.span_from(start),
+                    });
                 }
 
                 // Boundary, let next call handle
@@ -398,7 +670,7 @@ impl<'src> Lexer<'src> {
                     let esc_start = self.current_pos();
 
                     // Consume the \ and then the actual escape sequence
-                    self.advance(); 
+                    self.advance();
                     match self.advance() {
                         Some('n') => text.push('\n'),
                         Some('t') => text.push('\t'),
@@ -407,8 +679,16 @@ impl<'src> Lexer<'src> {
                         Some('"') => text.push('"'),
                         Some('$') => text.push('$'),
                         Some('0') => text.push('\0'),
-                        Some(_) => return Err(LexError::InvalidEscape { at: self.span_from(esc_start) }),
-                        None => return Err(LexError::UnterminatedString { start: self.span_from(start) }),
+                        Some(_) => {
+                            return Err(LexError::InvalidEscape {
+                                at: self.span_from(esc_start),
+                            });
+                        }
+                        None => {
+                            return Err(LexError::UnterminatedString {
+                                start: self.span_from(start),
+                            });
+                        }
                     }
                 }
 
@@ -427,7 +707,7 @@ impl<'src> Lexer<'src> {
     ///
     /// A number is where the current char is either an ASCII digit,
     /// or `.` followed by an ASCII digit.
-    /// 
+    ///
     /// See `Fermion3` specification for actual language spec
     fn lex_number(&mut self) -> LexResult {
         // Start of this number
@@ -443,13 +723,13 @@ impl<'src> Lexer<'src> {
                 _ => {}
             }
         }
- 
-        // The text of the literal 
+
+        // The text of the literal
         // we build this from here while we figure out if its
         // a float, UInt or Int for later parsing
         let mut text = String::new();
         let mut is_float = false;
- 
+
         // Starts with "." so must be a float
         // such as: `.5`
         if self.peek_char() == Some('.') {
@@ -469,7 +749,7 @@ impl<'src> Lexer<'src> {
                 self.consume_base_10_digits(&mut text);
             }
         }
- 
+
         // Exponent for a float
         if matches!(self.peek_char(), Some('e' | 'E')) {
             // Make a checkpoint here to grab all of exponent chars
@@ -478,12 +758,18 @@ impl<'src> Lexer<'src> {
             // the error)
             let exp_checkpoint = self.clone_chars();
             let mut exp_text = String::new();
-            exp_text.push(self.advance().expect("expected 'e'/'E' to be here since peek_char returned"));
-            
+            exp_text.push(
+                self.advance()
+                    .expect("expected 'e'/'E' to be here since peek_char returned"),
+            );
+
             if matches!(self.peek_char(), Some('+' | '-')) {
-                exp_text.push(self.advance().expect("expected '+'/'-' to be here since peek_char returned it"));
+                exp_text.push(
+                    self.advance()
+                        .expect("expected '+'/'-' to be here since peek_char returned it"),
+                );
             }
-            
+
             // Consume all of the exponent digits
             if self.peek_char().is_some_and(is_char_valid_base_10) {
                 self.consume_base_10_digits(&mut exp_text);
@@ -495,11 +781,11 @@ impl<'src> Lexer<'src> {
                 self.chars = exp_checkpoint;
             }
         }
- 
+
         // Check for `UInt` suffix of `u`/`U` suffix
         // same case with the exponents and trailing garbage
         let has_u_suffix = self.peek_is_valid_uint_suffix();
- 
+
         if has_u_suffix {
             // floats cant be unsigned...
             if is_float {
@@ -512,16 +798,16 @@ impl<'src> Lexer<'src> {
             }
             self.advance();
         }
- 
+
         // Prevent ident gluing onto the numeric literal when unexpected
         self.check_trailing_garbage(start, "invalid trailing characters after numeric literal")?;
- 
+
         // Produce the actual token from the text we built up while advancing
         if has_u_suffix {
             let value: u64 = text.parse().unwrap_or(0);
             return Ok(self.make_located(TokenKind::LitUInt(value), self.span_from(start)));
         }
- 
+
         if is_float {
             let value: f64 = text.parse().unwrap_or(f64::NAN);
             Ok(self.make_located(TokenKind::LitFloat(value), self.span_from(start)))
@@ -530,11 +816,11 @@ impl<'src> Lexer<'src> {
             Ok(self.make_located(TokenKind::LitInt(value), self.span_from(start)))
         }
     }
- 
+
     /// Consumes a run of base-10 digits at the current position,
-    /// appending each digit to `buf` 
-    /// 
-    /// `_` is accepted as a visual separator (e.g. `1_000_000`) 
+    /// appending each digit to `buf`
+    ///
+    /// `_` is accepted as a visual separator (e.g. `1_000_000`)
     /// but is not part of the final `buf`.
     fn consume_base_10_digits(&mut self, buf: &mut String) {
         while let Some(c) = self.peek_char() {
@@ -552,7 +838,7 @@ impl<'src> Lexer<'src> {
             }
         }
     }
- 
+
     /// Lexes some `Int` or `UInt` at the current position
     ///
     /// prefix_len is the number of elements to skip in the prefix as part
@@ -563,15 +849,15 @@ impl<'src> Lexer<'src> {
     fn lex_base_int(&mut self, prefix_len: usize, base: u32) -> LexResult {
         // Grab the current start position for errors that start from here
         let start = self.current_pos();
- 
+
         // Ignore the prefix
         for _ in 0..prefix_len {
             self.advance();
         }
- 
+
         // The position at which digits start..
         let digits_start = self.current_pos();
- 
+
         // Yoink all the digits part of the int. `_` is allowed as a
         // visual separator for long Ints/UInts and is dropped here
         // rather than collected, so `digits` is parse-ready as-is.
@@ -586,7 +872,7 @@ impl<'src> Lexer<'src> {
                 break;
             }
         }
- 
+
         // No digits since current = start for digits, which is illegal!
         if self.current_pos() == digits_start {
             return Err(LexError::MalformedNumber {
@@ -594,16 +880,16 @@ impl<'src> Lexer<'src> {
                 reason: String::from("expected digits after base prefix such as: `0x`, `0b`, `0o`"),
             });
         }
- 
+
         // Consume `UInt` suffix if it has one
         let has_uint_suffix = self.peek_is_valid_uint_suffix();
         if has_uint_suffix {
             self.advance();
         }
- 
+
         // Ensure there's no trailing garbage to prevent accidental ident gluing
         self.check_trailing_garbage(start, "invalid trailing characters after radix literal")?;
- 
+
         if has_uint_suffix {
             let value = u64::from_str_radix(&digits, base).unwrap_or(0);
             Ok(self.make_located(TokenKind::LitUInt(value), self.span_from(start)))
@@ -612,34 +898,44 @@ impl<'src> Lexer<'src> {
             Ok(self.make_located(TokenKind::LitInt(value), self.span_from(start)))
         }
     }
- 
+
     /// Returns whether or not the next character is a valid unsigned
     /// int suffix for an integer (basically is the next `u` or `U`)
     fn peek_is_valid_uint_suffix(&self) -> bool {
         matches!(self.peek_char(), Some('u' | 'U'))
     }
- 
+
     /// Check that there is no trailing garbage (non-reserved/whitespace)
     /// following this number
     ///
     /// Returns Ok(()) if there is none else a LexError.
-    fn check_trailing_garbage(&mut self, start: usize, reason: &'static str) -> Result<(), LexError> {
-        if self.peek_char().is_some_and(|c| !c.is_whitespace() && !Self::is_reserved(c)) {
+    fn check_trailing_garbage(
+        &mut self,
+        start: usize,
+        reason: &'static str,
+    ) -> Result<(), LexError> {
+        if self
+            .peek_char()
+            .is_some_and(|c| !c.is_whitespace() && !Self::is_reserved(c))
+        {
             // Consume the rest of the unspaced characters so the error span is perfectly sized
-            while self.peek_char().is_some_and(|c| !c.is_whitespace() && !Self::is_reserved(c)) {
+            while self
+                .peek_char()
+                .is_some_and(|c| !c.is_whitespace() && !Self::is_reserved(c))
+            {
                 self.advance();
             }
- 
+
             return Err(LexError::MalformedNumber {
                 at: self.span_from(start),
                 reason: String::from(reason),
             });
         }
- 
+
         Ok(())
     }
 }
- 
+
 /// Returns whether or not a character is a valid part of a digit
 /// under the provided base. `_` is always accepted as a visual
 /// separator between digits for long numbers, e.g. `1_000_000`.
@@ -648,7 +944,7 @@ impl<'src> Lexer<'src> {
 fn is_char_valid_under_base(c: char, base: u32) -> bool {
     c.is_digit(base) || c == '_'
 }
- 
+
 /// Returns whether or not a character is a valid part of a digit
 /// in base 10 (including the `_` separator).
 fn is_char_valid_base_10(c: char) -> bool {
