@@ -327,6 +327,83 @@ impl<'src> Lexer<'src> {
         }
     }
 
+
+     
+    /// Called while the current lexer mode is `StrLit`
+    /// 
+    /// Scans either a `StrFragment` of plain text with escapes resolved, 
+    /// or a boundary token such as a `StrInterpStart` on seeing `${`, or
+    /// a `StrEnd` on seeing the closing `"`.
+    /// 
+    /// After a boundary token, the mode is changed from `StrLit` to either
+    /// `StrInterp` or back out of `StrLit` from popping the `StrLit` mode.
+    fn lex_str_fragment_or_boundary(&mut self) -> LexResult {
+        // Start of this string fragment/boundary
+        let start = self.current_pos();
+
+        // Check boundaries first before we greedly 
+        // grab into a `StrFragment`
+
+        // End of string
+        if self.try_advance_str("\"") {
+            self.pop_mode();
+            return Ok(self.make_located(TokenKind::StrEnd, self.span_from(start)));
+        }
+
+        // Start of a StrInterp
+        if self.try_advance_str("${") {
+            self.push_mode(LexerMode::StrInterp);
+            return Ok(self.make_located(TokenKind::StrInterpStart, self.span_from(start)));
+        }
+        
+        // hit EOF before string terminated
+        if self.peek_char().is_none() {
+            return Err(LexError::UnterminatedString { start: self.span_from(start) });
+        }
+
+        // Greedly eat this as a `StrFragment`
+        let mut text = String::new();
+
+        loop {
+            match self.peek_char() {
+                None => {
+                    return Err(LexError::UnterminatedString { start: self.span_from(start) });
+                }
+
+                // Boundary, let next call handle
+                Some('"') => break,
+                Some('$') if self.peek_char_nth(1) == Some('{') => break,
+
+                // Escape sequence
+                Some('\\') => {
+                    let esc_start = self.current_pos();
+
+                    // Consume the \ and then the actual escape sequence
+                    self.advance(); 
+                    match self.advance() {
+                        Some('n') => text.push('\n'),
+                        Some('t') => text.push('\t'),
+                        Some('r') => text.push('\r'),
+                        Some('\\') => text.push('\\'),
+                        Some('"') => text.push('"'),
+                        Some('$') => text.push('$'),
+                        Some('0') => text.push('\0'),
+                        Some(_) => return Err(LexError::InvalidEscape { at: self.span_from(esc_start) }),
+                        None => return Err(LexError::UnterminatedString { start: self.span_from(start) }),
+                    }
+                }
+
+                // Random other characters
+                Some(other) => {
+                    text.push(other);
+                    self.advance();
+                }
+            }
+        }
+
+        Ok(self.make_located(TokenKind::StrFragment(text), self.span_from(start)))
+    }
+
     /// Attempt to tokenise a numeric literal
     ///
     /// A number is where the current char is either an ASCII digit,
