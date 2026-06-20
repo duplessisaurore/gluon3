@@ -227,6 +227,7 @@ pub enum TokenKind {
     Comma,     // ,
     Colon,     // :
     Semicolon, // ;
+    Newline,   // \n
 
     // = Delimiters ==
     DelLParen,   // (

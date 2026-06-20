@@ -299,6 +299,14 @@ impl<'src, FileName: Display> Lexer<'src, FileName> {
             return self.lex_eof();
         };
 
+        // Handle potential newlines left over
+        //
+        // We need these for the parser.
+        if c == '\n' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Newline, self.span_from(start)));
+        }
+
         // First we need to handle everything that can
         // change the current mode before we lex normal tokens.
 
@@ -570,7 +578,8 @@ impl<'src, FileName: Display> Lexer<'src, FileName> {
     fn skip_whitespace_comments(&mut self) {
         loop {
             match self.peek_char() {
-                Some(c) if c.is_whitespace() => {
+                // new lines are a dedicated token
+                Some(c) if c.is_whitespace() && c != '\n' => {
                     self.advance();
                 }
                 Some('/') if self.peek_char_nth(1) == Some('/') => {
