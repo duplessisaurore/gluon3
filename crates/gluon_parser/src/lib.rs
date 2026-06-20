@@ -15,3 +15,6 @@
 #![no_std]
 
 extern crate alloc;
+
+/// The AST types produced by the parser
+pub mod ast;
