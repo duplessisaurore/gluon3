@@ -18,3 +18,11 @@ extern crate alloc;
 
 /// The AST types produced by the parser
 pub mod ast;
+
+/// The actual `Parser` itself, this takes
+/// all the lexed `Tokens` as output and produces
+/// one `Module` representing that file.
+pub mod parser;
+
+/// Error types/result that can occur during parsing
+pub mod errors;

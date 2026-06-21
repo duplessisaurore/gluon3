@@ -32,7 +32,7 @@ pub struct Module<FileName: Display + Clone + PartialEq> {
     /// Any executable top-level expressions
     /// 
     /// This is such as global `let` bindings 
-    /// or statements that run when the module is initialized)
+    /// or various other AstNodes at the top level
     pub statements: Vec<AstNode<FileName>>,
 }
 
