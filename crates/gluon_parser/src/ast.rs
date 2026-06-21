@@ -514,6 +514,15 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     }
 }
 
+/// The type of a { field : value, etc. } alias
+/// as it's quite complex and repeated for Enums & Objects which
+/// we don't want more coupling
+///
+/// In this case it's a vec because we can have zero or more fields,
+/// each field is required with some name, but the payload is optional
+/// as in a pattern we can optionally rebind or destructure the field more.
+pub type PatternObjectLikeFields<FileName> = Vec<Field<Option<PatternNode<FileName>>>>;
+
 /// A possible pattern/destructuring pattern
 /// 
 /// This is all the ways that during binding
@@ -540,12 +549,12 @@ pub enum Pattern<FileName: Display + Clone + PartialEq> {
     },
     Object {
         target_type: Option<Box<AstNode<FileName>>>,
-        fields: Vec<Field<PatternNode<FileName>>>,
+        fields: PatternObjectLikeFields<FileName>,
     },
     EnumVariant {
         enum_type: Box<AstNode<FileName>>,
         variant_name: String,
-        fields: Option<Vec<Field<PatternNode<FileName>>>>,
+        fields: Option<PatternObjectLikeFields<FileName>>,
     },
 
     /// A quoted AST section that we attempt to match in a macro `match`.

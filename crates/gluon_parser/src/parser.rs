@@ -10,7 +10,7 @@ use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_lexer::{Token, TokenKind};
 
-use crate::{ast::{AstNode, ExprKind, Literal, Module, Pattern, PatternNode}, errors::{LocatedParseError, ParseError, ParseResult}};
+use crate::{ast::{AstNode, ExprKind, Field, Literal, Module, Pattern, PatternNode, PatternObjectLikeFields}, errors::{LocatedParseError, ParseError, ParseResult}};
 
 /// A mark which allows for storing the current position
 /// and resetting to it
@@ -541,5 +541,47 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // which is the start until the last pattern token we eated.
         let span = start_span.join(self.previous_span());
         Ok(self.make_located(kind, span))
+    }
+
+    /// Expects the next chunk of tokens to be the object fields section of the
+    /// pattern.
+    /// 
+    /// This is in the form of some
+    /// 
+    /// `{ field: Pattern }`
+    fn parse_object_pattern_field_list(&mut self) -> ParseResult<PatternObjectLikeFields<FileName>, FileName> {
+        // Starts with `{`
+        self.expect(TokenKind::DelLBrace)?;
+        let mut fields = Vec::new();
+
+        // Keep matching fields until we hit `}`
+        while !self.check(&TokenKind::DelRBrace) {
+            // The name of the field must be some identifier
+            let name = self.expect_ident_into_inner()?;
+
+            // We then may optionally have a pattern that the field either destructures
+            // or is aliased into
+            //
+            // e.g Point { x: my_x, y: my_y } or WrappedPoint { point: Point { x, y }}
+            let payload = if self.match_token(TokenKind::Colon).is_some() {
+                Some(self.parse_pattern()?)
+            } else {
+                None
+            };
+
+            fields.push(Field { name, payload });
+
+            // Commas are required for delimiting fields in an object-like thing
+            // in patterns & normally.
+            if self.match_token(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+
+        // Ends with `}`
+        // We don't build it here since empty fields {} is also
+        // technically just as valid (but why?)
+        self.expect(TokenKind::DelRBrace)?;
+        Ok(fields)
     }
 }
