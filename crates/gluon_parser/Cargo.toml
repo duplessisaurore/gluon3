@@ -14,3 +14,4 @@ keywords = ["languages", "scripting", "script"]
 
 [dependencies]
 gluon_debug = { workspace = true }
+gluon_lexer = { workspace = true }

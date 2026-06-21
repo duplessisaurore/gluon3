@@ -131,6 +131,7 @@ name = "gluon_parser"
 version = "1.0.0"
 dependencies = [
  "gluon_debug",
+ "gluon_lexer",
 ]
 
 [[package]]
