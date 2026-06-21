@@ -206,7 +206,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     fn expect_separator_or_terminator(
         &mut self,
         terminator: &TokenKind,
-    ) -> Result<(), LocatedParseError<FileName>> {
+    ) -> ParseResult<(), FileName> {
         // Continuously consume all `;`'s.
         if self.match_token(TokenKind::Semicolon).is_some() {
             while self.match_token(TokenKind::Semicolon).is_some() {
@@ -263,7 +263,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// This may error in many ways!! See `ParseError`, generally
     /// if things are not in the valid sequence for the grammar as defined
     /// in the specification.
-    pub fn parse_module(&mut self) -> Result<Module<FileName>, LocatedParseError<FileName>> {
+    pub fn parse_module(&mut self) -> ParseResult<Module<FileName>, FileName> {
         // Fill in this module with each top level component
         let mut module = Module {
             name: Rc::clone(&self.file),
