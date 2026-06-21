@@ -993,4 +993,21 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             span,
         ))
     }
+
+    // = EXPRESSIONS =
+    // The precendence heirachy is as follows
+    // generally the further from the entry point is higher precedence (since we recurse first)
+    //
+    // assignment
+    // pipeline
+    // binary op
+    // type op
+    // unary op
+    // postfix stuff
+    // atomics
+    //
+    // parse_expression => assignment => pipeline => ... => atomics should be the order.
+    // ==============
+
+    
 }
