@@ -1,5 +1,6 @@
 //! Errors that can occur during the parsing process
 
+use alloc::string::String;
 use gluon_debug::Located;
 use gluon_lexer::TokenKind;
 
@@ -32,5 +33,20 @@ pub enum ParseError {
     MixedOperatorsWithoutParentheses {
         expected: TokenKind,
         found: TokenKind,
+    },
+
+    /// A generic statement which cannot be made `public` 
+    /// using the `pub` modifier
+    PublicModifierOnGenericStatement,
+
+    /// A `import` statement, there are no re-exports so
+    /// this cannot be made public either!
+    PublicModifierOnImport,
+
+    /// We expect that a statement is over which is then ended
+    /// with a semicolon `;` or if it's the last statement in a
+    /// sequence then the `terminator` follows.
+    ExpectedSeparatorOrTerminator {
+        terminator: TokenKind
     }
 }

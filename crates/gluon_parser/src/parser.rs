@@ -10,7 +10,7 @@ use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_lexer::{Token, TokenKind};
 
-use crate::errors::{LocatedParseError, ParseError, ParseResult};
+use crate::{ast::Module, errors::{LocatedParseError, ParseError, ParseResult}};
 
 /// A mark which allows for storing the current position
 /// and resetting to it
@@ -197,6 +197,40 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         self.cursor = mark.0
     }
 
+    /// After parsing one statement in a sequence, consumes the `;` separating
+    /// it from the next plus any further `;`. 
+    /// 
+    /// If that parsed statement is intended to be the last in some sequence of statements,
+    /// which ends with a `terminatoor`, don't require a `;`. since `;` should only be mandatory
+    /// between statements, not on the final one.
+    fn expect_separator_or_terminator(
+        &mut self,
+        terminator: &TokenKind,
+    ) -> Result<(), LocatedParseError<FileName>> {
+        // Continuously consume all `;`'s.
+        if self.match_token(TokenKind::Semicolon).is_some() {
+            while self.match_token(TokenKind::Semicolon).is_some() {
+            }
+            return Ok(());
+        }
+
+        // No semicolons, check if we are either at the EoF, or if
+        // the passed in terminator follows in which this is the last statement
+        // of a sequence so we don't forcibly require `;`
+        if self.check(terminator) || self.is_at_end() {
+            return Ok(());
+        }
+
+        // Not last statement in sequence or at EoF.
+        // Invalid! we expect a separator or terminator here
+        Err(self.make_located(
+            ParseError::ExpectedSeparatorOrTerminator {
+                terminator: terminator.clone()
+            },
+            self.current_span(),
+        ))
+    }
+
     // = Statement Boundary Checking =
 
     /// This returns whether or not we are currently at a statement boundary.
@@ -218,5 +252,82 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // Anything else is not a boundary token!
         false
+    }
+
+    /// Runs the `Parser` continuously over the source input
+    /// until EOF is hit or an error occurs, returns all the
+    /// tokens in a `Module`
+    ///
+    /// # Errors
+    ///
+    /// This may error in many ways!! See `ParseError`, generally
+    /// if things are not in the valid sequence for the grammar as defined
+    /// in the specification.
+    pub fn parse_module(&mut self) -> Result<Module<FileName>, LocatedParseError<FileName>> {
+        // Fill in this module with each top level component
+        let mut module = Module {
+            name: Rc::clone(&self.file),
+            imports: Vec::new(),
+            types: Vec::new(),
+            macros: Vec::new(),
+            functions: Vec::new(),
+            statements: Vec::new(),
+        };
+
+        // Parse until the end of the file
+        //
+        // This loop is responsible for parsing all the top level module
+        // statements (TLS) which may or may not be public.
+        while !self.is_at_end() {
+            // Check if this TLS is public or not. 
+            let is_pub = self.match_token(TokenKind::KwPub).is_some();
+            let next_kind = self.peek_token().map(|token| token.kind.clone());
+
+            
+            // Check for any top level statements that can be public
+            // or just a general statement that should be evaluated
+            match next_kind {
+                Some(TokenKind::KwImport) => {
+                    // Imports cannot be made "public"/rexported.
+                    if is_pub {
+                        return Err(self.make_located(
+                            ParseError::PublicModifierOnImport,
+                            self.current_span(),
+                        ));
+                    }
+
+                    module.imports.push(self.parse_import()?);
+                }
+                Some(TokenKind::KwType) => {
+                    module.types.push(self.parse_type_def(is_pub)?);
+                }
+                Some(TokenKind::KwFn) => {
+                    module.functions.push(self.parse_function_like_def(is_pub, false)?);
+                }
+                Some(TokenKind::KwMacro) => {
+                    self.advance()?;
+                    self.expect(TokenKind::KwFn)?;
+                    module.macros.push(self.parse_function_like_def(is_pub, true)?);
+                }
+                Some(TokenKind::KwLet) => {
+                    module.statements.push(self.parse_let_binding(is_pub)?);
+                }
+                _ => {
+                    // General statements which are just executed cannot be made public either
+                    if is_pub {
+                        return Err(self.make_located(
+                            ParseError::PublicModifierOnGenericStatement,
+                            self.current_span(),
+                        ));
+                    }
+                    module.statements.push(self.parse_statement()?);
+                }
+            }
+
+            // A separator or terminator should follow a TLS.
+            self.expect_separator_or_terminator(&TokenKind::Eof)?;
+        }
+
+        Ok(module)
     }
 }
