@@ -376,7 +376,7 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// 
     /// `<target> = <target> <op> <value>`
     CompoundAssignment {
-        op: Located<String, FileName>,
+        op: Box<AstNode<FileName>>,
         target: Box<AstNode<FileName>>,
         value: Box<AstNode<FileName>>,
     },
@@ -389,14 +389,14 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// parenthesis, but whenever mixing then we need to require
     /// parenthesis
     BinaryOp {
-        op: Located<String, FileName>,
+        op: Box<AstNode<FileName>>,
         left: Box<AstNode<FileName>>,
         right: Box<AstNode<FileName>>,
     },
 
     /// A simple unary operation
     UnaryOp {
-        op: Located<String, FileName>,
+        op: Box<AstNode<FileName>>,
         expr: Box<AstNode<FileName>>,
     },
 
