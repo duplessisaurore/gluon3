@@ -23,6 +23,7 @@ pub mod ast;
 /// all the lexed `Tokens` as output and produces
 /// one `Module` representing that file.
 pub mod parser;
+pub use parser::Parser;
 
 /// Error types/result that can occur during parsing
 pub mod errors;

@@ -14,6 +14,7 @@
 use clap::Parser;
 use gluon_debug::SourceFile;
 use gluon_lexer::Lexer;
+use gluon_parser::Parser as GluonParser;
 use std::{error::Error, fs, path::PathBuf, process};
 
 #[derive(Parser)]
@@ -55,6 +56,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
-    println!("{:#?}", tokens);
+    // Parse fermion3 source
+    let mut parser = GluonParser::new(
+        tokens,
+        SourceFile {
+            filename: input_path.display().to_string(),
+        }
+        .into(),
+    );
+
+    let ast = parser.parse_module().unwrap_or_else(|e| {
+        eprintln!("parse error: {:?}", e);
+        process::exit(1);
+    });
+
+    println!("{:#?}", ast);
     Ok(())
 }

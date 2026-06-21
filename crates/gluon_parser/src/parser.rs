@@ -51,6 +51,14 @@ pub struct Parser<FileName: Display + Clone + PartialEq> {
     /// The source file to track from which the tokens
     /// came from when building the module and SourceLocations.
     file: Rc<SourceFile<FileName>>,
+
+    /// The speculative current depth of angle brackets `<...>`
+    /// 
+    /// This is to prevent reinterpreting angle brackets as the
+    /// binary operation instead of the actual angle brackets for
+    /// parametric types, as types inherently have no notion of
+    /// less/greater.
+    speculative_angle_depth: usize,
 }
 
 impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
@@ -64,6 +72,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             tokens,
             cursor: 0,
             file,
+            speculative_angle_depth: 0
         }
     }
 
@@ -344,7 +353,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 None => Publicity::Private,
             };
             let next_kind = self.peek_token().map(|token| token.kind.clone());
-
+            
             // Check for any top level statements that can be public
             // or just a general statement that should be evaluated
             match next_kind {
@@ -360,9 +369,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     module.imports.push(self.parse_import()?);
                 }
                 Some(TokenKind::KwType) => {
+                    self.advance()?;
                     module.types.push(self.parse_type_def(publicity)?);
                 }
                 Some(TokenKind::KwFn) => {
+                    self.advance()?;
                     module
                         .functions
                         .push(self.parse_function_like_def(publicity, FunctionKind::Function)?);
@@ -375,6 +386,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                         .push(self.parse_function_like_def(publicity, FunctionKind::Macro)?);
                 }
                 Some(TokenKind::KwLet) => {
+                    self.advance()?;
                     module.statements.push(self.parse_let_binding(publicity)?);
                 }
                 _ => {
@@ -794,9 +806,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// of some parametric typed thing
     ///
     /// This takes the form of `<type: constraints/types, etc..>`
-    /// where we expect that the left angle delim has not yet been eated.
+    /// where we expect that the left angle delim has been eated.
     pub fn parse_type_parameters(&mut self) -> ParseResult<TypeParams<FileName>, FileName> {
-        self.expect(TokenKind::DelLAngle)?;
+        // we are now in parametric types parsing, dont interpret `<` or `>`
+        // as a possible binary operator.
+        self.speculative_angle_depth += 1;
 
         // Build the list of params, if we've specified <> then it makes sense that
         // <> on its own is an empty list.
@@ -826,6 +840,9 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             }
         }
 
+        // Done with parsing the parametric type
+        self.speculative_angle_depth -= 1;
+
         self.expect(TokenKind::DelRAngle)?;
         Ok(params)
     }
@@ -846,32 +863,49 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             return None;
         }
 
+        // we are now in parametric type argument parsing, dont interpret `<` or `>`
+        // as a possible binary operator.
+        self.speculative_angle_depth += 1;
+        let result = self.try_parse_parametric_args_inner();
+        self.speculative_angle_depth -= 1; 
+
+        // If we succeeded then good, this is a parametric arguments set
+        // else reset back so another function (e.g `<` or `>` as binary ops)
+        // can try with the tokens
+        match result {
+            Some(args) => Some(args),
+            None => {
+                self.reset(mark);
+                None
+            }
+        }
+    }
+
+   /// The inner component of the `try_parse_parametric_args` method,
+   /// this is because there is too many returns TwT and we want to push back
+   /// up the speculative angle depth 
+    fn try_parse_parametric_args_inner(&mut self) -> Option<Vec<AstNode<FileName>>> {
         // Try parse all the parametric arguments, empty `<>` is just an empty vec
         let mut args = Vec::new();
         loop {
             // Parametric args can be values, so we parse up to the binary layer
             match self.parse_binary() {
                 Ok(arg) => args.push(arg),
-                Err(_) => {
-                    self.reset(mark);
-                    return None;
-                }
+                Err(_) => return None,
             }
 
-            // They must be delimited by a `,` comma.
+            // Parametric args must be delimited by `,` commas.
             if self.match_token(TokenKind::Comma).is_some() {
                 continue;
             }
 
-            // We've actually got an end here! it must be a generic
+            // We've actually got an end here! it must be a generic.
+            //
             // this is enforced by the strict operator parenthesis rule
             // as you cant have X < Y > B without X<Y> B.
             if self.match_token(TokenKind::DelRAngle).is_some() {
                 return Some(args);
             }
-
-            // If we hit neither a comma nor `>`, it's not a valid generic list
-            self.reset(mark);
             return None;
         }
     }
@@ -1081,14 +1115,17 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // `<` / `>` are lexed as DelLAngle/DelRAngle (shared with generics),
         // but are still valid bare operators on their own and we need to consider
-        // them! lower them to a simple identifier.
-        if self.match_token(TokenKind::DelLAngle).is_some() {
+        // them!
+        //
+        // They should only be considered when we are not already trying to parse some expression
+        // as parametric types, in which case the `speculative_angle_depth` > 0
+        if self.speculative_angle_depth == 0 && self.match_token(TokenKind::DelLAngle).is_some() {
             return Ok(Some(self.make_located(
                 ExprKind::Identifier(String::from("<")),
                 start_span,
             )));
         }
-        if self.match_token(TokenKind::DelRAngle).is_some() {
+        if self.speculative_angle_depth == 0 && self.match_token(TokenKind::DelRAngle).is_some() {
             return Ok(Some(self.make_located(
                 ExprKind::Identifier(String::from(">")),
                 start_span,
@@ -1312,7 +1349,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     // Different operator than the prior one!
                     // this is illegal without parenthesis according to our rule.
                     return Err(
-                        self.make_located(ParseError::MixedInfixOperators, op.location.span)
+                        self.make_located(ParseError::MixedInfixOperators {
+                            prev_ident: prev_key.clone(),
+                            cur_ident: op_identity
+
+                        }, op.location.span)
                     );
                 }
             }

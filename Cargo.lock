@@ -141,6 +141,7 @@ dependencies = [
  "clap",
  "gluon_debug",
  "gluon_lexer",
+ "gluon_parser",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 //! Errors that can occur during the parsing process
 
+use alloc::string::String;
 use gluon_debug::Located;
 use gluon_lexer::TokenKind;
 
@@ -28,7 +29,10 @@ pub enum ParseError {
     /// 
     /// Mixing operators without parenthesis is not permitted
     /// read the `Fermion3` spec at the "Function Calls" section.
-    MixedInfixOperators,
+    MixedInfixOperators {
+        prev_ident: Option<String>,
+        cur_ident: Option<String>,
+    },
 
     /// A generic statement which cannot be made `public` 
     /// using the `pub` modifier
