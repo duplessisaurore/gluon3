@@ -53,4 +53,13 @@ pub enum ParseError {
     /// When trying to parse a pattern, it was entirely
     /// invalid/no valid starter
     InvalidPattern, 
+
+    /// When trying to parse an `Array` `Pattern` there
+    /// were multiple spreads used in that pattern!
+    /// 
+    /// This is dissallowed because the splitting of the
+    /// spreads is like impossible to determine without
+    /// including it as part of the syntax which is doing
+    /// too much for patterns that should be simple.
+    MoreThanOneArrayPatternSpread,
 }

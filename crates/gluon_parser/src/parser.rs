@@ -584,4 +584,53 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         self.expect(TokenKind::DelRBrace)?;
         Ok(fields)
     }
+
+
+    /// Expects the next chunk of tokens to be the remaining array
+    /// pattern excluding the first `[`.
+    /// 
+    /// This is in the form of some
+    /// 
+    /// `befores, ..rest, after]`
+    fn parse_array_pattern(&mut self) -> Result<Pattern<FileName>, LocatedParseError<FileName>> {
+        let mut before = Vec::new();
+        let mut rest = None;
+        let mut after = Vec::new();
+
+        // Keep yoinking from pattern until we hit `]`
+        while !self.check(&TokenKind::DelRBracket) {
+
+            // ... spread for rest
+            if self.match_token(TokenKind::DotDotDot).is_some() {
+                
+                // We can only have one spread! else its impossible to
+                // determine how the user wants it spread.
+                if rest.is_some() {
+                    return Err(self.make_located(
+                        ParseError::MoreThanOneArrayPatternSpread,
+                        self.previous_span(),
+                    ));
+                }
+                rest = Some(Box::new(self.parse_pattern()?));
+            } else {
+                // Non-spread, either this goes before the `rest` or after it
+                // (woawww do you really need to comment that? yes.. i forget)
+                // these are just simple things like `[before1, before2, ..rest, after1, after2]`
+                let pat = self.parse_pattern()?;
+                if rest.is_none() {
+                    before.push(pat);
+                } else {
+                    after.push(pat);
+                }
+            }
+
+            // Array fields must be delimited with a ","
+            if self.match_token(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+
+        self.expect(TokenKind::DelRBracket)?;
+        Ok(Pattern::Array { before, rest, after })
+    }
 }
