@@ -10,7 +10,7 @@ use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_lexer::{Token, TokenKind};
 
-use crate::{ast::{AstNode, Module}, errors::{LocatedParseError, ParseError, ParseResult}};
+use crate::{ast::{AstNode, ExprKind, Module}, errors::{LocatedParseError, ParseError, ParseResult}};
 
 /// A mark which allows for storing the current position
 /// and resetting to it
@@ -110,6 +110,35 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             ))
         }
     }
+
+    /// Consume from the current position a simple String Literal which only contains
+    /// one `StrFragment` and no interpolations.
+    /// 
+    /// This returns the actual string fragment content or otherwise
+    /// errors with an `UnexpectedToken` if it's not a simple string.
+    pub fn expect_simple_string_literal(&mut self) -> ParseResult<String, FileName> {
+        // Must start with a StrStart
+        self.expect(TokenKind::StrStart)?;
+
+        // Followed by the string..
+        let text = match self.advance()?.kind {
+            TokenKind::StrFragment(text) => text,
+            found => {
+                return Err(self.make_located(
+                    ParseError::UnexpectedToken {
+                        expected: TokenKind::StrFragment(String::from("<simple string>")),
+                        found,
+                    },
+                    self.previous_span(),
+                ))
+            }
+        };
+
+        // Then only a StrEnd, no interpolations or anything!
+        self.expect(TokenKind::StrEnd)?;
+        Ok(text)
+    }
+
 
     /// Check if the current token matches a specific kind without consuming it.
     pub fn check(&self, kind: &TokenKind) -> bool {
@@ -396,5 +425,29 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         } else {
             self.parse_expression(Publicity::Private)
         }
+    }
+
+    /// Parses an `import <path> [as <alias>]` statement at the current position
+    /// 
+    /// This assumes that the `import` has not been consumed.
+    fn parse_import(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        // Store the start position for the final `AstNode` total span.
+        let start_span = self.expect(TokenKind::KwImport)?.location.span;
+
+        // The path is a simple string here
+        let path = self.expect_simple_string_literal()?;
+
+        // Optional alias which begins with an `as`
+        let alias = if self.match_token(TokenKind::KwAs).is_some() {
+
+            // Must be followed by an Ident
+            Some(self.expect_ident_into_inner()?)
+        } else {
+            None
+        };
+
+        // Total span of the entire `import` statement
+        let span = start_span.join(self.previous_span());
+        Ok(self.make_located(ExprKind::Import { path, alias }, span))
     }
 }
