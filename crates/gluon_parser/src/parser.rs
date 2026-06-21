@@ -6,11 +6,11 @@
 
 use core::fmt::{Display, Debug as DebugTrait};
 
-use alloc::{rc::Rc, vec::Vec};
+use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_lexer::{Token, TokenKind};
 
-use crate::errors::{LocatedParseError, ParseError};
+use crate::errors::{LocatedParseError, ParseError, ParseResult};
 
 /// A mark which allows for storing the current position
 /// and resetting to it
@@ -67,7 +67,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
     /// Consume the current token and advance the cursor.
     /// Returns an UnexpectedEof error if we try to advance past the end.
-    pub fn advance(&mut self) -> Result<Token<FileName>, LocatedParseError<FileName>> {
+    pub fn advance(&mut self) -> ParseResult<Token<FileName>, FileName> {
         if self.is_at_end() || self.cursor >= self.tokens.len() {
             return Err(self.unexpected_eof());
         }
@@ -75,6 +75,24 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         let token = self.tokens[self.cursor].clone();
         self.cursor += 1;
         Ok(token)
+    }
+
+    /// Consume the current token as an `Ident` token kind and return the string
+    /// inside the `Ident` back out, this returns the actual identifier or otherwise
+    /// errors with an `UnexpectedToken` if it's not an identifier.
+    pub fn expect_ident_into_inner(&mut self) -> ParseResult<String, FileName> {
+        let token = self.advance()?;
+        if let TokenKind::Ident(text) = token.kind {
+            Ok(text)
+        } else {
+            Err(self.make_located(
+                ParseError::UnexpectedToken {
+                    expected: TokenKind::Ident(String::from("<identifier>")),
+                    found: token.kind,
+                },
+                token.location.span,
+            ))
+        }
     }
 
     /// Check if the current token matches a specific kind without consuming it.
@@ -93,7 +111,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     pub fn expect(
         &mut self,
         expected_kind: TokenKind,
-    ) -> Result<Token<FileName>, LocatedParseError<FileName>> {
+    ) -> ParseResult<Token<FileName>, FileName> {
         // Matches token.. consume and advance
         if self.check(&expected_kind) {
             self.advance()

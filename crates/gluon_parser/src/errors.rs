@@ -6,9 +6,8 @@ use gluon_lexer::TokenKind;
 use crate::ast::AstNode;
 
 /// Result of one step of the parsing process, this is just a convenience
-/// over having to write Result<AstNode<FileName>, `LexError`> everywhere if the token
-/// type needs to change or something.
-pub type ParseResult<FileName> = Result<AstNode<FileName>, LocatedParseError<FileName>>;
+/// over having to write Result<T, `LocatedParseError<FileName>`> everywhere
+pub type ParseResult<T, FileName> = Result<T, LocatedParseError<FileName>>;
 
 /// We want to keep source information with the ParseErrors so
 /// the user of the parser can nicely output them.
