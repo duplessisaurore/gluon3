@@ -633,4 +633,29 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         self.expect(TokenKind::DelRBracket)?;
         Ok(Pattern::Array { before, rest, after })
     }
+
+    /// Parses a quote body
+    /// 
+    /// This is some ``
+    /// <body>
+    /// ``
+    /// 
+    /// Idk how else to explain it mane/womane/othermane/person
+    /// 
+    /// This assumes the starting two quotes "``" have already been
+    /// eaten yummy yummy yummy in my tummy!!
+    fn parse_quote_body(&mut self) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+        // The block should start from the `` span, so we yoink that.
+        let start_span = self.previous_span();
+
+        // Parse the whole statements inside the quote block
+        // where the terminator of the last statement is the ``
+        //
+        // The quote still works on the AST just at a later phase.
+        let stmts = self.parse_block_contents(&TokenKind::MacroQuoteEnd)?;
+        
+        self.expect(TokenKind::MacroQuoteEnd)?;
+        let span = start_span.join(self.previous_span());
+        Ok(self.make_located(ExprKind::Block(stmts), span))
+    }
 }
