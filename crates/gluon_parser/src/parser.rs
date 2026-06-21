@@ -10,7 +10,7 @@ use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_lexer::{Token, TokenKind};
 
-use crate::{ast::Module, errors::{LocatedParseError, ParseError, ParseResult}};
+use crate::{ast::{AstNode, Module}, errors::{LocatedParseError, ParseError, ParseResult}};
 
 /// A mark which allows for storing the current position
 /// and resetting to it
@@ -203,6 +203,9 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// If that parsed statement is intended to be the last in some sequence of statements,
     /// which ends with a `terminatoor`, don't require a `;`. since `;` should only be mandatory
     /// between statements, not on the final one.
+    /// 
+    /// LE IMPORTANTE NOTE!:
+    /// This function only consumes `;`'s IT DOES NOT CONSUME THE TERMINATOR!!!!
     fn expect_separator_or_terminator(
         &mut self,
         terminator: &TokenKind,
@@ -230,8 +233,6 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             self.current_span(),
         ))
     }
-
-    // = Statement Boundary Checking =
 
     /// This returns whether or not we are currently at a statement boundary.
     /// 
@@ -329,5 +330,31 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         }
 
         Ok(module)
+    }
+
+    /// Parses a sequence of `;` separated statements until `terminator`
+    /// This follows the `Terminators` section where the last statement does
+    /// not require an explicit `;` as it is followed by the `terminator`.
+    /// 
+    /// This is any possible block, including bodies of functions, 
+    /// macro quotes (essentially a block if you think about it :3c)
+    fn parse_block_contents(
+        &mut self,
+        terminator: &TokenKind,
+    ) -> ParseResult<Vec<AstNode<FileName>>, FileName> {
+        let mut stmts = Vec::new();
+
+        while !self.check(terminator) && !self.is_at_end() {
+            stmts.push(self.parse_statement()?);
+
+            // Each statement should be followed by the separator `;`,
+            // or be the final statement in which case is followed by the
+            // terminator !!
+            //
+            // This function only consumes the separator so the terminator
+            // would fail the loop condition on the next iteration.
+            self.expect_separator_or_terminator(terminator)?;
+        }
+        Ok(stmts)
     }
 }
