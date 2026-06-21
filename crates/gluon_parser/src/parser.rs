@@ -196,4 +196,27 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     fn reset(&mut self, mark: Mark) {
         self.cursor = mark.0
     }
+
+    // = Statement Boundary Checking =
+
+    /// This returns whether or not we are currently at a statement boundary.
+    /// 
+    /// A statement boundary is a location in which a statement ends, in this case
+    /// we can then advance to the next statement.
+    /// 
+    /// This is the `Terminators` section of the `Fermion3` spec.
+    pub fn at_statement_boundary(&self) -> bool {
+        // EoF is always the end
+        let Some(token) = self.peek_token() else {
+            return true;
+        };
+
+        // A semicolon is an explicit terminator
+        if token.kind == TokenKind::Semicolon {
+            return true;
+        }
+
+        // Anything else is not a boundary token!
+        false
+    }
 }
