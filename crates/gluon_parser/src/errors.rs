@@ -26,14 +26,12 @@ pub enum ParseError {
     /// We expected a token, but found the End Of File!
     UnexpectedEof,
 
-    /// There is a strict operator with parenthesis rule.
+    /// Mixing different infix operators within the same chain without
+    /// parentheses to disambiguate, e.g. `1 + 1 * 2`.
     /// 
     /// Mixing operators without parenthesis is not permitted
     /// read the `Fermion3` spec at the "Function Calls" section.
-    MixedOperatorsWithoutParentheses {
-        expected: TokenKind,
-        found: TokenKind,
-    },
+    MixedInfixOperators,
 
     /// A generic statement which cannot be made `public` 
     /// using the `pub` modifier

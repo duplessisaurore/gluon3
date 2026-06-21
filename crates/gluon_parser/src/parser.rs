@@ -996,6 +996,61 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         ))
     }
 
+    /// Parses an infix function expression which is essentially an operator
+    ///
+    /// This is either:
+    /// - a simple identifier (`+`),
+    /// - a field access math.add
+    /// or a parenthesised expression
+    ///
+    /// Returns `Ok(None)` without consuming anything if the current position
+    /// doesn't start any of the above, otherwise returns the infix operator expression
+    fn parse_infix_operator(&mut self) -> ParseResult<Option<AstNode<FileName>>, FileName> {
+        let start_span = self.current_span();
+
+        // Parenthesised expression beginning wth `(`
+        if self.match_token(TokenKind::DelLParen).is_some() {
+            let expr = self.parse_expression()?;
+            self.expect(TokenKind::DelRParen)?;
+
+            // Re-span to cover the parens themselves, not just the inner expr.
+            let span = start_span.join(self.previous_span());
+            return Ok(Some(self.make_located(expr.kind, span)));
+        }
+
+        // Everything else starts with an identifier like
+        // `+`, or the base of a field access like `math.add`.
+        let Some(TokenKind::Ident(_)) = self.peek_token().map(|t| &t.kind) else {
+            return Ok(None);
+        };
+
+        // Grab the first ident which we assume to just be a simple ident first
+        let text = self.expect_ident_into_inner()?;
+        let mut node = self.make_located(ExprKind::Identifier(text), start_span);
+
+        // We keep checking each access following
+        // the individual to make sure its a field access
+        while self.check(&TokenKind::Dot)
+            && matches!(
+                self.peek_token_nth(1).map(|t| &t.kind),
+                Some(TokenKind::Ident(_))
+            )
+        {
+            self.advance()?;
+            let field = self.expect_ident_into_inner()?;
+            let span = start_span.join(self.previous_span());
+            node = self.make_located(
+                ExprKind::FieldAccess {
+                    expr: Box::new(node),
+                    field,
+                },
+                span,
+            );
+        }
+
+        Ok(Some(node))
+    }
+
     // = EXPRESSIONS =
     // The precendence heirachy is as follows
     // generally the further from the entry point is higher precedence (since we recurse first)
@@ -1024,23 +1079,20 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// This is essentially of the form:
     /// `<target expr> = <rvalue expr>` or `<target expr> += <rvalue expr>`
     fn parse_assignment(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
-        let start_span = self.current_span();
-
         // Parse LHS
         let left = self.parse_pipeline()?;
 
-        // Check for compound assignment with some ident
-        // next to the `=` which is the function we are trying
-        // to compound assign with.
-        if let Some(TokenKind::Ident(op_text)) = self.peek_token().map(|t| &t.kind) {
-            if self.peek_token_nth(1).map(|t| &t.kind) == Some(&TokenKind::Equal) {
-                let op_span = self.current_span();
-
-                // Consume both tokens, else when we recurse on the
-                // rhs we will hit an unexpected ident = rhs
-                self.advance()?;
-                self.advance()?;
-
+        // Check for compound assignment
+        //
+        // `<target> <op> = <value>`
+        //
+        // <op> is whatever `parse_infix_operator` can produce
+        //
+        // We try parse this and roll back if the rest of the
+        // compound assignment doesn't fit.
+        let mark = self.mark();
+        if let Some(op) = self.parse_infix_operator()? {
+            if self.match_token(TokenKind::Equal).is_some() {
                 // Parse RHS
                 let value = self.parse_assignment()?;
 
@@ -1049,16 +1101,20 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
                 return Ok(self.make_located(
                     ExprKind::CompoundAssignment {
-                        op: self.make_located(op_text.clone(), op_span),
+                        op: Box::new(op),
                         target: Box::new(left),
                         value: Box::new(value),
                     },
                     span,
                 ));
             }
+
+            // Wasn't actually a compound assignment, so put
+            // back whatever parse_infix_operator consumed
+            self.reset(mark);
         }
 
-        // Standard assignment no in middle compound
+        // Standard assignment no in middle infix
         if self.match_token(TokenKind::Equal).is_some() {
             // grab RHS, `=` already consumed by `match_token`
             let value = self.parse_expression()?;
@@ -1076,12 +1132,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         Ok(left)
     }
 
-
     /// Parses a pipeline chain
     ///
     /// This is essentially of the form:
     /// `<expr> |> <receiver_fn> <|> <reciever fn>*`
-    fn parse_pipeline(&mut self, restricted: bool) -> ParseResult<AstNode<FileName>, FileName> {
+    fn parse_pipeline(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         // Parse the expression we are plugging into the pipeline
         let mut expr = self.parse_binary()?;
 
@@ -1097,7 +1152,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 // RHS reciever
                 let right = self.parse_binary()?;
 
-                // make pipeline with the current expr iteratively (left associative) 
+                // make pipeline with the current expr iteratively (left associative)
                 let span = expr.location.span.join(right.location.span);
                 expr = self.make_located(
                     ExprKind::Pipeline {
@@ -1114,5 +1169,93 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // Return our pipeline expr if we have one,
         // or the binary result
         Ok(expr)
+    }
+
+    /// Attempts to build a string identity for an infix operator
+    /// expression, so two occurrences can be compared for sameness
+    /// in regards to the rule of chaining binary ops
+    ///
+    /// This only succeeds for the field accesses and simple idents
+    /// because lowkey sameness for a normal expression is too hard
+    fn infix_operator_key(node: &AstNode<FileName>) -> Option<String> {
+        match &node.kind {
+            ExprKind::Identifier(text) => Some(text.clone()),
+            ExprKind::FieldAccess { expr, field } => {
+                let expr_key = Self::infix_operator_key(expr)?;
+                Some(format!("{expr_key}.{field}"))
+            }
+            _ => None,
+        }
+    }
+
+    /// Parses a sequence of binary operations
+    ///
+    /// This is essentially of the form:
+    /// `<expr> + <expr> + <expr>` or `<expr> * <expr>`
+    ///
+    /// This enforces the strict infix sequence rule.
+    ///
+    /// Chains of the exact same infix function are folded, but mixing
+    /// different infix functions without parenthesis is an error.
+    ///
+    /// E.g (1 + 1 + 1 + 1) * 2 * 2 is fine, but 1 + 1 * 2 is not.
+    fn parse_binary(&mut self) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+        let mut left = self.parse_typeops()?;
+
+        // Tracks the identity of the operator currently being folded:
+        // `None`                  => no operator taken yet (first iter)
+        // `Some(None)`            => an operator was taken but we cant track it
+        // `Some(Some(identity))`  => an operator was taken with identity
+        //
+        // See `infix_operator_key` for specifics
+        let mut current_op_identity: Option<Option<String>> = None;
+
+        loop {
+            // At the boundary, dont keep taking
+            if self.at_statement_boundary() {
+                break;
+            }
+
+            // Try match the same infix operator (or the first)
+            let Some(op) = self.parse_infix_operator()? else {
+                break;
+            };
+
+            let op_identity = Self::infix_operator_key(&op);
+
+            // If we already had some prior op in the chain...
+            if let Some(prev_key) = &current_op_identity {
+                // Only fold when we know exactly that this is the same op
+                // by identity to enforce the rule.
+                //
+                // If either side is opaque, we treat them as different
+                // bcz lowkey theres no way to know.
+                let same = matches!((prev_key, &op_identity), (Some(a), Some(b)) if a == b);
+                if !same {
+                    // Different operator than the prior one!
+                    // this is illegal without parenthesis according to our rule.
+                    return Err(
+                        self.make_located(ParseError::MixedInfixOperators, op.location.span)
+                    );
+                }
+            }
+
+            // parse RHS and fold
+            let right = self.parse_typeops()?;
+            let span = left.location.span.join(right.location.span);
+            left = self.make_located(
+                ExprKind::BinaryOp {
+                    op: Box::new(op),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+
+            // Update identity to track the identity of the operator.
+            current_op_identity = Some(op_identity);
+        }
+
+        Ok(left)
     }
 }
