@@ -12,8 +12,7 @@ use gluon_lexer::{Token, TokenKind};
 
 use crate::{
     ast::{
-        AstNode, ExprKind, Field, Literal, Module, Pattern, PatternNode, PatternObjectLikeFields,
-        Publicity, TypeParams,
+        AstNode, ExprKind, Field, Literal, Module, ObjectElement, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
     },
     errors::{LocatedParseError, ParseError, ParseResult},
 };
@@ -1584,5 +1583,42 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // or just the base `primary` result if there
         // was no postfix..
         Ok(expr)
+    }
+
+    /// Parses the inner object elements of a literal, this assumes
+    /// that the `{` starting the object has been consumed.
+    /// 
+    /// This takes the form of:
+    /// `{ field: value }`
+    fn parse_object_literal_elements(&mut self) -> ParseResult<Vec<ObjectElement<FileName>>, FileName> {
+        // Empty objects `{}` are valid
+        let mut elements = Vec::new();
+
+        // Parse until the final `}``
+        while !self.check(&TokenKind::DelRBrace) {
+            // Account for spreads.
+            if self.match_token(TokenKind::DotDotDot).is_some() {
+                elements.push(ObjectElement::Spread(self.parse_expression()?));
+            } else {
+                // Normal field: value case, field must be an ident
+                let name = self.expect_ident_into_inner()?;
+                self.expect(TokenKind::Colon)?;
+
+                let value = self.parse_expression()?;
+                elements.push(ObjectElement::Field(Field {
+                    name,
+                    payload: Box::new(value),
+                }));
+            }
+
+            // Fields must be `,` delimited!
+            if self.match_token(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+
+        // Object literals must be ended by a `}`
+        self.expect(TokenKind::DelRBrace)?;
+        Ok(elements)
     }
 }
