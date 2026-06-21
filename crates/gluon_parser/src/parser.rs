@@ -951,16 +951,18 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         ))
     }
 
-
     /// Parses a let binding
     ///
     /// This is essentially of the form:
     /// `let <mut?> <name/pattern> <: annotation> = <rvalue expr>`
-    /// 
+    ///
     /// We assume the `let` keyword has already been consumed.
-    /// 
+    ///
     /// my head HURTSSSS owwww
-    fn parse_let_binding(&mut self, publicity: Publicity) -> ParseResult<AstNode<FileName>, FileName> {
+    fn parse_let_binding(
+        &mut self,
+        publicity: Publicity,
+    ) -> ParseResult<AstNode<FileName>, FileName> {
         let start_span = self.previous_span();
 
         // Check if a `mut` follows the `let`
@@ -1009,5 +1011,68 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     // parse_expression => assignment => pipeline => ... => atomics should be the order.
     // ==============
 
-    
+    /// The entry point for parsing any expression.
+    ///
+    /// This calls the lowest precedence expression kind parser.
+    /// (assignment in our case :))
+    pub fn parse_expression(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        self.parse_assignment()
+    }
+
+    /// Parses an assignment operation
+    ///
+    /// This is essentially of the form:
+    /// `<target expr> = <rvalue expr>` or `<target expr> += <rvalue expr>`
+    fn parse_assignment(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.current_span();
+
+        // Parse LHS
+        let left = self.parse_pipeline()?;
+
+        // Check for compound assignment with some ident
+        // next to the `=` which is the function we are trying
+        // to compound assign with.
+        if let Some(TokenKind::Ident(op_text)) = self.peek_token().map(|t| &t.kind) {
+            if self.peek_token_nth(1).map(|t| &t.kind) == Some(&TokenKind::Equal) {
+                let op_span = self.current_span();
+
+                // Consume both tokens, else when we recurse on the
+                // rhs we will hit an unexpected ident = rhs
+                self.advance()?;
+                self.advance()?;
+
+                // Parse RHS
+                let value = self.parse_expression()?;
+
+                // Total span will be left to the right
+                let span = left.location.span.join(value.location.span);
+
+                return Ok(self.make_located(
+                    ExprKind::CompoundAssignment {
+                        op: self.make_located(op_text.clone(), op_span),
+                        target: Box::new(left),
+                        value: Box::new(value),
+                    },
+                    span,
+                ));
+            }
+        }
+
+        // Standard assignment no in middle compound
+        if self.match_token(TokenKind::Equal).is_some() {
+            // grab RHS, `=` already consumed by `match_token`
+            let value = self.parse_expression()?;
+            let span = left.location.span.join(value.location.span);
+            return Ok(self.make_located(
+                ExprKind::Assignment {
+                    target: Box::new(left),
+                    value: Box::new(value),
+                },
+                span,
+            ));
+        }
+
+        // No assignment here, return pipeline result.
+        Ok(left)
+    }
 }
