@@ -830,6 +830,53 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         Ok(params)
     }
 
+    /// Attempts to parse parametric arguments
+    /// 
+    /// This takes the form of:
+    /// `<Int, String>`
+    /// 
+    /// If it fails, it rewinds the cursor so the 
+    /// `<` can be parsed elsewhere
+    fn try_parse_parametric_args(&mut self) -> Option<Vec<AstNode<FileName>>> {
+        // Save position here
+        let mark = self.mark();
+
+        // ?
+        if self.match_token(TokenKind::DelLAngle).is_none() {
+            return None;
+        }
+
+        // Try parse all the parametric arguments, empty `<>` is just an empty vec
+        let mut args = Vec::new();
+        loop {
+            // Parametric args can be values, so we parse up to the binary layer
+            match self.parse_binary() {
+                Ok(arg) => args.push(arg),
+                Err(_) => {
+                    self.reset(mark);
+                    return None;
+                }
+            }
+
+
+            // They must be delimited by a `,` comma.
+            if self.match_token(TokenKind::Comma).is_some() {
+                continue;
+            }
+
+            // We've actually got an end here! it must be a generic
+            // this is enforced by the strict operator parenthesis rule
+            // as you cant have X < Y > B without X<Y> B.
+            if self.match_token(TokenKind::DelRAngle).is_some() {
+                return Some(args);
+            }
+            
+            // If we hit neither a comma nor `>`, it's not a valid generic list
+            self.reset(mark);
+            return None;
+        }
+    }
+
     /// Parses a function-like definition (functions or macros)
     ///
     /// This is essentially of the form:
@@ -1018,6 +1065,22 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             return Ok(Some(self.make_located(expr.kind, span)));
         }
 
+        // `<` / `>` are lexed as DelLAngle/DelRAngle (shared with generics),
+        // but are still valid bare operators on their own and we need to consider
+        // them! lower them to a simple identifier.
+        if self.match_token(TokenKind::DelLAngle).is_some() {
+            return Ok(Some(self.make_located(
+                ExprKind::Identifier(String::from("<")),
+                start_span,
+            )));
+        }
+        if self.match_token(TokenKind::DelRAngle).is_some() {
+            return Ok(Some(self.make_located(
+                ExprKind::Identifier(String::from(">")),
+                start_span,
+            )));
+        }
+
         // Everything else starts with an identifier like
         // `+`, or the base of a field access like `math.add`.
         let Some(TokenKind::Ident(_)) = self.peek_token().map(|t| &t.kind) else {
@@ -1199,7 +1262,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// different infix functions without parenthesis is an error.
     ///
     /// E.g (1 + 1 + 1 + 1) * 2 * 2 is fine, but 1 + 1 * 2 is not.
-    fn parse_binary(&mut self) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+    fn parse_binary(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         let mut left = self.parse_typeops()?;
 
         // Tracks the identity of the operator currently being folded:
@@ -1265,7 +1328,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     /// This is essentially of the form:
     /// `<expr> as <Type>` or `<expr> is <Type>`
-    fn parse_typeops(&mut self) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+    fn parse_typeops(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         // LHS
         let mut expr = self.parse_unary()?;
 
@@ -1323,11 +1386,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     /// This is essentially of the form:
     /// `<UNARY_OPERATORS><expr>`
-    fn parse_unary(&mut self) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+    fn parse_unary(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         // Check if its a unary operator..
         let looks_like_prefix_op = matches!(
             self.peek_token().map(|t| &t.kind),
-            Some(TokenKind::Ident(text)) if UNARY_OPERATORS.contains(&text.as_str())
+            Some(TokenKind::Ident(text)) if Self::UNARY_OPERATORS.contains(&text.as_str())
         );
 
         // We have one!
@@ -1345,12 +1408,181 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             let span = start_span.join(expr.location.span);
 
             return Ok(self.make_located(
-                ExprKind::UnaryOp { op: Box::new(op), expr },
+                ExprKind::UnaryOp {
+                    op: Box::new(op),
+                    expr,
+                },
                 span,
             ));
         }
 
         // Not a unary operator, just fall through and let postfix handle it
         self.parse_postfix()
+    }
+
+    /// Parses postfix modifiers and structural chaining
+    ///
+    /// This parses:
+    /// - Field Accesses `.field`
+    /// - Function Calls `()`
+    /// - Array Indexing `[]`
+    /// - Parametric Types `<>`
+    ///
+    fn parse_postfix(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        // Parse LHS (this postfix applies to the LHS)
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            // Postfix ended since we are at the boundary
+            if self.at_statement_boundary() {
+                break;
+            }
+
+            // Keep matching as many postfix as we can.
+            match self.peek_token().map(|t| &t.kind) {
+                // Try see if it's a generic (LAngle, RAngle)
+                Some(TokenKind::DelLAngle) => {
+                    if let Some(args) = self.try_parse_parametric_args() {
+                        let span = expr.location.span.join(self.previous_span());
+                        expr = self.make_located(
+                            ExprKind::Parametric {
+                                target: Box::new(expr),
+                                arguments: args,
+                            },
+                            span,
+                        );
+                        continue;
+                    } else {
+                        // It's a `<` as in less than, let the BinaryOp handle this
+                        // (fall back down precedence)
+                        break;
+                    }
+                }
+
+                // Function Calls
+                Some(TokenKind::DelLParen) => {
+                    // Consume `(``
+                    self.advance()?;
+
+                    // All the arguments are expressions
+                    let mut arguments = Vec::new();
+
+                    // Keep grabbing arguments until we hit the `)`
+                    while !self.check(&TokenKind::DelRParen) {
+                        arguments.push(self.parse_expression()?);
+
+                        // Arguments must be `,` delimited.
+                        if self.match_token(TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                    self.expect(TokenKind::DelRParen)?;
+
+                    let span = expr.location.span.join(self.previous_span());
+                    expr = self.make_located(
+                        ExprKind::Call {
+                            callee: Box::new(expr),
+                            arguments,
+                        },
+                        span,
+                    );
+                }
+
+                // Indexing and Slicing
+                Some(TokenKind::DelLBracket) => {
+                    self.advance()?;
+
+                    // Check whether or not we have some current element
+                    // is the start of a slice (.. here means No slice start)
+                    let start = if self.check(&TokenKind::DotDot) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_pipeline()?))
+                    };
+
+                    // Now we enter the slice, `parse_pipeline` above would parse
+                    // the index/start if there was one.
+                    if self.match_token(TokenKind::DotDot).is_some() {
+
+                        // Grab the optional end after the ..
+                        let end = if self.check(&TokenKind::DelRBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_pipeline()?))
+                        };
+                        self.expect(TokenKind::DelRBracket)?;
+
+                        // Put start and end together for the slice
+                        let span = expr.location.span.join(self.previous_span());
+                        expr = self.make_located(
+                            ExprKind::Slice {
+                                array: Box::new(expr),
+                                start,
+                                end,
+                            },
+                            span,
+                        );
+                    } else {
+                        // In this case the start was just a index because we dont have
+                        // the slice ..
+                        self.expect(TokenKind::DelRBracket)?;
+                        let span = expr.location.span.join(self.previous_span());
+                        expr = self.make_located(
+                            ExprKind::IndexAccess {
+                                expr: Box::new(expr),
+                                index: start.unwrap(),
+                            },
+                            span,
+                        );
+                    }
+                }
+
+                // Field Access / Enum Variants
+                Some(TokenKind::Dot) => {
+                    self.advance()?;
+
+                    // The field access/enum variant `.` must be followed by an ident
+                    let field = self.expect_ident_into_inner()?;
+
+                    // Check for an Enum Variant Literal `Shape.Circle { radius }`
+                    if self.check(&TokenKind::DelLBrace) {
+
+                        // Since we have a `{}` it must be, so full steam ahead!
+                        self.advance()?;
+
+                        // Grab all of the elements in this literal
+                        let elements = self.parse_object_literal_elements()?;
+                        self.expect(TokenKind::DelRBrace)?;
+
+                        let span = expr.location.span.join(self.previous_span());
+                        expr = self.make_located(
+                            ExprKind::EnumVariantLiteral {
+                                enum_type: Box::new(expr),
+                                variant_name: field,
+                                elements: Some(elements),
+                            },
+                            span,
+                        );
+                    } else {
+                        // We just have a simple field access, no enum variant because no `{}`
+                        let span = expr.location.span.join(self.previous_span());
+                        expr = self.make_located(
+                            ExprKind::FieldAccess {
+                                expr: Box::new(expr),
+                                field,
+                            },
+                            span,
+                        );
+                    }
+                }
+
+                _ => break,
+            }
+        }
+
+        // Return the postfix expression
+        // or just the base `primary` result if there
+        // was no postfix..
+        Ok(expr)
     }
 }
