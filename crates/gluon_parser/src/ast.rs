@@ -26,8 +26,13 @@ pub struct Module<FileName: Display + Clone + PartialEq> {
     /// Top-level `type` declarations
     pub types: Vec<AstNode<FileName>>,
 
-    /// Top-level `fn` and `macro fn` declarations
+    /// Top-level `fn` declarations
     pub functions: Vec<AstNode<FileName>>,
+
+    /// Top-level `macro fn` declarations, we keep
+    /// this seperate from `functions` because macros
+    /// are inherently compile time as opposed to run time.
+    pub macros: Vec<AstNode<FileName>>,
 
     /// Any executable top-level expressions
     /// 
