@@ -193,7 +193,15 @@ pub enum TokenKind {
     KwIn,
 
     /// Add methods to a type
+    /// 
+    /// Or in `match <thing> with { arms }`
     KwWith,
+
+    /// If <condition> then {}
+    KwThen,
+
+    /// While/for <thingy blah blah> do {}
+    KwDo,
 
     /// Guard for a type
     KwWhere,

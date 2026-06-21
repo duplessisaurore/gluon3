@@ -648,6 +648,8 @@ impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
             "is" => TokenKind::KwIs,
             "in" => TokenKind::KwIn,
             "with" => TokenKind::KwWith,
+            "then" => TokenKind::KwThen,
+            "do" => TokenKind::KwDo,
             "where" => TokenKind::KwWhere,
             "fail" => TokenKind::KwFail,
             "defer" => TokenKind::KwDefer,

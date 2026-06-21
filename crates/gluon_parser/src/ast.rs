@@ -66,6 +66,16 @@ pub enum Literal {
     Str(String),
 }
 
+/// The publicity of an element
+/// 
+/// This is mainly for future proofing
+/// if we ever wanted pub module or something.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum Publicity {
+    Public,
+    Private,
+}
+
 /// A named field paired with some payload.
 ///
 /// This is a shared shape for many constructs
@@ -153,7 +163,7 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// let <if "mut" then is_mutable> <pattern><: annotation> = <initializer>
     LetBinding {
         /// Let bindings can be public in the scope
-        is_pub: bool,
+        publicity: Publicity,
 
         /// the optional <mut> before the pattern
         is_mutable: bool,
@@ -174,7 +184,7 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// A closure is the same but without a <name>
     FunctionDef {
         /// Function definitions can be public
-        is_pub: bool,
+        publicity: Publicity,
 
         /// None for anonymous closures
         name: Option<String>, 
@@ -202,7 +212,7 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// syntax too long blehhh go look at `Fermion3` specification.
     TypeDef {
         /// Type definitions can be public
-        is_pub: bool,
+        publicity: Publicity,
 
         /// There are no "anonymous types" like closures, 
         /// so we always have a name 
@@ -470,7 +480,7 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// new source code !! yayy macros
     MacroDef {
         // See `FunctionDef` for the field meanings
-        is_pub: bool,
+        publicity: Publicity,
         name: String,
         type_params: TypeParams<FileName>,
         params: Vec<ValueParam<FileName>>,
