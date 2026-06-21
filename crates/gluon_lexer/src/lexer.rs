@@ -231,6 +231,16 @@ impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
                 | '<'
                 | '>'
                 | '$'
+                | '+'
+                | '-'
+                | '*'
+                | '/' 
+                | '!' 
+                | '&' 
+                | '|' 
+                | '%' 
+                | '^' 
+                | '~'
         )
     }
 
@@ -353,6 +363,37 @@ impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
             return Ok(self.make_located(TokenKind::PipeArrow, self.span_from(start)));
         }
 
+        // It's just kinda nicer for the more traditional operators if we
+        // forcibly reserve them and then make them identifiers here, to prevent
+        // gluing for them as programmers are used to being able to glue em to idents
+        if self.try_advance_str("**") {
+            return Ok(self.make_located(TokenKind::Ident(String::from("**")), self.span_from(start)));
+        }
+
+        if self.try_advance_str("==") {
+            return Ok(self.make_located(TokenKind::Ident(String::from("==")), self.span_from(start)));
+        }
+
+        if self.try_advance_str("!=") {
+            return Ok(self.make_located(TokenKind::Ident(String::from("!=")), self.span_from(start)));
+        }
+
+        if self.try_advance_str("&&") {
+            return Ok(self.make_located(TokenKind::Ident(String::from("&&")), self.span_from(start)));
+        }
+
+        if self.try_advance_str("||") {
+            return Ok(self.make_located(TokenKind::Ident(String::from("||")), self.span_from(start)));
+        }
+
+        if self.try_advance_str("<=") {
+            return Ok(self.make_located(TokenKind::Ident(String::from("<=")), self.span_from(start)));
+        }
+
+        if self.try_advance_str(">=") {
+            return Ok(self.make_located(TokenKind::Ident(String::from(">=")), self.span_from(start)));
+        }
+
         // Check if we are entering a StrLiteral section.
         if self.try_advance_str("\"") {
             self.push_mode(LexerMode::StrTextLiteral { start });
@@ -413,6 +454,57 @@ impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
         if c == '>' {
             self.advance();
             return Ok(self.make_located(TokenKind::DelRAngle, self.span_from(start)));
+        }
+
+        // Simple operators once again for gluing...
+        if c == '+' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("+")), self.span_from(start)));
+        }
+
+        if c == '-' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("-")), self.span_from(start)));
+        }
+
+        if c == '*' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("*")), self.span_from(start)));
+        }
+
+        if c == '/' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("/")), self.span_from(start)));
+        }
+
+        if c == '!' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("!")), self.span_from(start)));
+        }
+
+        if c == '&' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("&")), self.span_from(start)));
+        }
+
+        if c == '|' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("|")), self.span_from(start)));
+        }
+
+        if c == '%' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("%")), self.span_from(start)));
+        }
+
+        if c == '^' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("^")), self.span_from(start)));
+        }
+
+        if c == '~' {
+            self.advance();
+            return Ok(self.make_located(TokenKind::Ident(String::from("~")), self.span_from(start)));
         }
 
         // Delimiters (need mode structural tracking/handling Interp/Slice)
