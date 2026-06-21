@@ -712,7 +712,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         //
         // types are values so a type is produced by an expression.
         self.expect(TokenKind::Equal)?;
-        let mut node = self.parse_expression()?;
+        let mut node = self.parse_type_expression()?;
 
         // Check in a loop for all the additions
         // `where`, `fail`, `with`.
@@ -824,7 +824,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // Optional annotation of the type
             let annotation = if self.match_token(TokenKind::Colon).is_some() {
                 // The constraint can be any expression that produces a type, because it can be a parameterised type too.
-                Some(Box::new(self.parse_expression()?))
+                Some(Box::new(self.parse_type_expression()?))
             } else {
                 None
             };
@@ -972,8 +972,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             let param_pat = self.parse_pattern()?;
 
             // Check for annotation
-            let annotation = if self.match_token(TokenKind::Colon).is_some() {
-                Some(Box::new(self.parse_expression()?))
+            let annotation: Option<Box<Located<ExprKind<FileName>, FileName>>> = if self.match_token(TokenKind::Colon).is_some() {
+                Some(Box::new(self.parse_type_expression()?))
             } else {
                 None
             };
@@ -994,7 +994,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // Functions have a return type
             FunctionKind::Function => {
                 if self.match_token(TokenKind::ThinArrow).is_some() {
-                    Some(Box::new(self.parse_expression()?))
+                    Some(Box::new(self.parse_type_expression()?))
                 } else {
                     None
                 }
@@ -1068,7 +1068,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // Optional annotation for guarding.
         let annotation = if self.match_token(TokenKind::Colon).is_some() {
-            Some(Box::new(self.parse_expression()?))
+            Some(Box::new(self.parse_type_expression()?))
         } else {
             None
         };
@@ -1186,6 +1186,17 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// (assignment in our case :))
     pub fn parse_expression(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         self.parse_assignment()
+    }
+
+    /// Entry point for parsing a *type expression* that should result in a value
+    /// of type `=`
+    ///
+    /// Deliberately skips `parse_assignment` as letting it fall through to 
+    /// `parse_assignment` causes the annotation to swallow the rest of the statement 
+    /// e.g. `let x: UInt = 0x10000000u` getting parsed as an assignment instead of 
+    /// stopping after `UInt`.
+    pub fn parse_type_expression(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        self.parse_pipeline()
     }
 
     /// Parses an assignment operation
