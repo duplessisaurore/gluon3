@@ -48,5 +48,9 @@ pub enum ParseError {
     /// sequence then the `terminator` follows.
     ExpectedSeparatorOrTerminator {
         terminator: TokenKind
-    }
+    },
+
+    /// When trying to parse a pattern, it was entirely
+    /// invalid/no valid starter
+    InvalidPattern, 
 }

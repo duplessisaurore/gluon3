@@ -6,11 +6,11 @@
 
 use core::fmt::{Display, Debug as DebugTrait};
 
-use alloc::{rc::Rc, string::String, vec::Vec};
+use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_lexer::{Token, TokenKind};
 
-use crate::{ast::{AstNode, ExprKind, Module}, errors::{LocatedParseError, ParseError, ParseResult}};
+use crate::{ast::{AstNode, ExprKind, Literal, Module, Pattern, PatternNode}, errors::{LocatedParseError, ParseError, ParseResult}};
 
 /// A mark which allows for storing the current position
 /// and resetting to it
@@ -116,7 +116,9 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// 
     /// This returns the actual string fragment content or otherwise
     /// errors with an `UnexpectedToken` if it's not a simple string.
-    pub fn expect_simple_string_literal(&mut self) -> ParseResult<String, FileName> {
+    /// 
+    /// The `string_for` should describe what the string is for on the error case
+    pub fn expect_simple_string_literal(&mut self, string_for: impl Into<String>) -> ParseResult<String, FileName> {
         // Must start with a StrStart
         self.expect(TokenKind::StrStart)?;
 
@@ -126,7 +128,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             found => {
                 return Err(self.make_located(
                     ParseError::UnexpectedToken {
-                        expected: TokenKind::StrFragment(String::from("<simple string>")),
+                        expected: TokenKind::StrFragment(format!("<string with no interpolation for: {}>", string_for.into())),
                         found,
                     },
                     self.previous_span(),
@@ -435,7 +437,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         let start_span = self.expect(TokenKind::KwImport)?.location.span;
 
         // The path is a simple string here
-        let path = self.expect_simple_string_literal()?;
+        let path = self.expect_simple_string_literal("import path")?;
 
         // Optional alias which begins with an `as`
         let alias = if self.match_token(TokenKind::KwAs).is_some() {
@@ -449,5 +451,95 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // Total span of the entire `import` statement
         let span = start_span.join(self.previous_span());
         Ok(self.make_located(ExprKind::Import { path, alias }, span))
+    }
+
+    /// Expects the next chunk of tokens to be some pattern to parse
+    /// 
+    /// Patterns are kind of a DSL for destructuring and `match` statements (i
+    /// feel like i wrote this somehwhere else already but i forgor :skull:).
+    pub fn parse_pattern(&mut self) -> ParseResult<PatternNode<FileName>, FileName> {
+        // Start of the pattern for the final `PatternNode` span.
+        let start_span = self.current_span();
+        let token = self.advance()?;
+
+        // Try match the specific pattern variety.
+        let kind = match token.kind {
+            // The pattern begins with an identifier!
+            // this is the complex case (wildcard, object, enums, simple just ident?)
+            TokenKind::Ident(text) => {
+                if text == "_" {
+                    Pattern::Wildcard
+
+                // An `object`, since we don't have Type.Variant for enums.
+                } else if self.check(&TokenKind::DelLBrace) {
+                    let fields = self.parse_object_pattern_field_list()?;
+                    Pattern::Object {
+                        target_type: Some(Box::new(self.make_located(ExprKind::Identifier(text), start_span))),
+                        fields,
+                    }
+
+                // Some kind of field access, which if followed by another identifier
+                // must be an `enum` in a pattern.
+                } else if self.check(&TokenKind::Dot)
+                    && matches!(self.peek_token_nth(1).map(|t| &t.kind), Some(TokenKind::Ident(_)))
+                {
+                    self.advance()?;
+                    let variant_name = self.expect_ident_into_inner()?;
+
+                    // If there is no LBrace then this is a fieldless variant e.g Option.None
+                    let fields = if self.match_token(TokenKind::DelLBrace).is_some() {
+                        // Fields for enum are essentially just an object..
+                        Some(self.parse_object_pattern_field_list()?)
+                    } else {
+                        None
+                    };
+
+                    Pattern::EnumVariant {
+                        enum_type: Box::new(self.make_located(ExprKind::Identifier(text), start_span)),
+                        variant_name,
+                        fields,
+                    }
+                } else {
+                    Pattern::Identifier(text)
+                }
+            }
+
+            // Parse an array pattern from here `[...pattern...`
+            TokenKind::DelLBracket => self.parse_array_pattern()?,
+
+            // An unhygenic identifier, this is just a `#` (already consumed) followed
+            // by the actual identifier
+            TokenKind::MacroHash => Pattern::UnhygienicIdentifier(self.expect_ident_into_inner()?),
+
+            // Simple value literals
+            TokenKind::LitInt(n) => Pattern::Lit(Literal::Int(n)),
+            TokenKind::LitUInt(n) => Pattern::Lit(Literal::UInt(n)),
+            TokenKind::LitFloat(n) => Pattern::Lit(Literal::Float(n)),
+            TokenKind::LitBool(b) => Pattern::Lit(Literal::Bool(b)),
+            TokenKind::LitUnit => Pattern::Lit(Literal::Unit),
+
+            // Simple string literals for matching (no interpolation allowed).
+            TokenKind::StrStart => {
+                let text = self.expect_simple_string_literal("pattern")?;
+                Pattern::Lit(Literal::Str(text))
+            }
+
+            // Macro quote body for AST matching in macros to simplify macros
+            // producing different output based on input.
+            TokenKind::MacroQuoteStart => Pattern::Quote(Box::new(self.parse_quote_body()?)),
+            
+            // Nothing here starts a valid pattern
+            _ => {
+                return Err(self.make_located(
+                    ParseError::InvalidPattern,
+                    start_span,
+                ))
+            }
+        };
+
+        // Combine the pattern back in with the full span of the pattern
+        // which is the start until the last pattern token we eated.
+        let span = start_span.join(self.previous_span());
+        Ok(self.make_located(kind, span))
     }
 }
