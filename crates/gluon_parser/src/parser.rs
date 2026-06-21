@@ -12,7 +12,8 @@ use gluon_lexer::{Token, TokenKind};
 
 use crate::{
     ast::{
-        AstNode, ExprKind, Field, Literal, Module, ObjectElement, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
+        AstNode, ExprKind, Field, Literal, Module, ObjectElement, Pattern, PatternNode,
+        PatternObjectLikeFields, Publicity, TypeParams,
     },
     errors::{LocatedParseError, ParseError, ParseResult},
 };
@@ -830,11 +831,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     }
 
     /// Attempts to parse parametric arguments
-    /// 
+    ///
     /// This takes the form of:
     /// `<Int, String>`
-    /// 
-    /// If it fails, it rewinds the cursor so the 
+    ///
+    /// If it fails, it rewinds the cursor so the
     /// `<` can be parsed elsewhere
     fn try_parse_parametric_args(&mut self) -> Option<Vec<AstNode<FileName>>> {
         // Save position here
@@ -857,7 +858,6 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 }
             }
 
-
             // They must be delimited by a `,` comma.
             if self.match_token(TokenKind::Comma).is_some() {
                 continue;
@@ -869,7 +869,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             if self.match_token(TokenKind::DelRAngle).is_some() {
                 return Some(args);
             }
-            
+
             // If we hit neither a comma nor `>`, it's not a valid generic list
             self.reset(mark);
             return None;
@@ -903,11 +903,27 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         };
 
         // Type Parameters `<Type: Constraints/Types, ...>`
-        let type_params = if self.match_token(TokenKind::DelLAngle).is_some() {
-            self.parse_type_parameters()?
-        } else {
-            // Empty by default (no type params)
-            Vec::new()
+        // Return Type `-> Type` before the block.
+        let type_params = match kind {
+            // Functions have a return type
+            FunctionKind::Function => {
+                if self.match_token(TokenKind::DelLAngle).is_some() {
+                    self.parse_type_parameters()?
+                } else {
+                    // Empty by default (no type params)
+                    Vec::new()
+                }
+            }
+
+            // Macros do not have type parameters!!
+            FunctionKind::Macro => {
+                if self.match_token(TokenKind::DelLAngle).is_some() {
+                    return Err(self
+                        .make_located(ParseError::MacroWithTypeParameters, self.previous_span()));
+                } else {
+                    Vec::new()
+                }
+            }
         };
 
         // Value Parameters `(Pattern: Type, ...)`
@@ -988,7 +1004,6 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     // This should be handled by the above function
                     name: name
                         .expect("name should be not None here because None was handled already"),
-                    type_params,
                     params,
                     body,
                 },
@@ -1429,7 +1444,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     fn parse_postfix(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         // Parse LHS (this postfix applies to the LHS)
-        let mut expr = self.parse_primary()?;
+        let mut expr = self.parse_atom()?;
 
         loop {
             // Postfix ended since we are at the boundary
@@ -1463,19 +1478,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     // Consume `(``
                     self.advance()?;
 
-                    // All the arguments are expressions
-                    let mut arguments = Vec::new();
-
-                    // Keep grabbing arguments until we hit the `)`
-                    while !self.check(&TokenKind::DelRParen) {
-                        arguments.push(self.parse_expression()?);
-
-                        // Arguments must be `,` delimited.
-                        if self.match_token(TokenKind::Comma).is_none() {
-                            break;
-                        }
-                    }
-                    self.expect(TokenKind::DelRParen)?;
+                    // Parse the function arguments
+                    let arguments = self.parse_fn_arguments()?;
 
                     let span = expr.location.span.join(self.previous_span());
                     expr = self.make_located(
@@ -1502,7 +1506,6 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     // Now we enter the slice, `parse_pipeline` above would parse
                     // the index/start if there was one.
                     if self.match_token(TokenKind::DotDot).is_some() {
-
                         // Grab the optional end after the ..
                         let end = if self.check(&TokenKind::DelRBracket) {
                             None
@@ -1545,13 +1548,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
                     // Check for an Enum Variant Literal `Shape.Circle { radius }`
                     if self.check(&TokenKind::DelLBrace) {
-
                         // Since we have a `{}` it must be, so full steam ahead!
                         self.advance()?;
 
                         // Grab all of the elements in this literal
                         let elements = self.parse_object_literal_elements()?;
-                        self.expect(TokenKind::DelRBrace)?;
 
                         let span = expr.location.span.join(self.previous_span());
                         expr = self.make_located(
@@ -1587,10 +1588,12 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
     /// Parses the inner object elements of a literal, this assumes
     /// that the `{` starting the object has been consumed.
-    /// 
+    ///
     /// This takes the form of:
     /// `{ field: value }`
-    fn parse_object_literal_elements(&mut self) -> ParseResult<Vec<ObjectElement<FileName>>, FileName> {
+    fn parse_object_literal_elements(
+        &mut self,
+    ) -> ParseResult<Vec<ObjectElement<FileName>>, FileName> {
         // Empty objects `{}` are valid
         let mut elements = Vec::new();
 
@@ -1620,5 +1623,297 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // Object literals must be ended by a `}`
         self.expect(TokenKind::DelRBrace)?;
         Ok(elements)
+    }
+
+    /// Parses an atomic expression
+    ///
+    /// This is the bottom of evaluation. It parses base values:
+    ///
+    /// Literals, Identifiers, Parenthesized sub-expressions, complex structures
+    /// `if`, `match`, loops, and macros `@macro`, `$splice`.
+    fn parse_atom(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.current_span();
+
+        // Grab the atomic token.
+        let token = self.advance()?;
+
+        let kind = match token.kind {
+            // Literals
+            TokenKind::LitInt(n) => ExprKind::Lit(Literal::Int(n)),
+            TokenKind::LitUInt(n) => ExprKind::Lit(Literal::UInt(n)),
+            TokenKind::LitFloat(n) => ExprKind::Lit(Literal::Float(n)),
+            TokenKind::LitBool(b) => ExprKind::Lit(Literal::Bool(b)),
+            TokenKind::LitUnit => ExprKind::Lit(Literal::Unit),
+
+            // Strings with interpolation handled
+            TokenKind::StrStart => {
+                // Generally a string with interpolation is the string fragments and
+                // the expressions of the interpolations.
+                let mut parts = Vec::new();
+
+                // Track if we have an interp at all to shove only a simple StrLiteral
+                // vs the full StrInterp with vec.
+                let mut has_interp = false;
+
+                loop {
+                    // Grab the current part's token
+                    let part_token = self.advance()?;
+                    match part_token.kind {
+                        // A simple fragment, just add it to the parts
+                        TokenKind::StrFragment(text) => {
+                            let span = part_token.location.span;
+                            parts.push(self.make_located(ExprKind::Lit(Literal::Str(text)), span));
+                        }
+                        // The start of some interpolation region
+                        TokenKind::StrInterpStart => {
+                            has_interp = true;
+                            // Followed by the expression and then the end of the region
+                            let expr = self.parse_expression()?;
+                            self.expect(TokenKind::StrInterpEnd)?;
+                            parts.push(expr);
+                        }
+                        // End of the string
+                        TokenKind::StrEnd => break,
+                        // ????
+                        _ => {
+                            return Err(self.make_located(
+                                ParseError::UnexpectedStringToken,
+                                part_token.location.span,
+                            ));
+                        }
+                    }
+                }
+
+                // If we have interpolation then don't simplify
+                if has_interp {
+                    ExprKind::StrInterp(parts)
+                } else {
+                    // Collapse to Str Literal to simplify it if there isnt an interp
+                    match parts.into_iter().next() {
+                        Some(node) => node.kind,
+                        None => ExprKind::Lit(Literal::Str(alloc::string::String::new())),
+                    }
+                }
+            }
+            // Identifiers (and potential Object Literals)
+            // All enum variants are handled by the `FieldAccess` possiblity
+            // in postfix
+            TokenKind::Ident(text) => {
+                // We have an object literal!
+                if self.match_token(TokenKind::DelLBrace).is_some() {
+                    // Parse all its elements..
+                    let elements = self.parse_object_literal_elements()?;
+
+                    let target = self.make_located(ExprKind::Identifier(text), start_span);
+                    ExprKind::ObjectLiteral {
+                        target_type: Some(Box::new(target)),
+                        elements,
+                    }
+                // Simple placeholder here (for pipelines or something)
+                } else if text == "_" {
+                    ExprKind::Placeholder
+                } else {
+                    ExprKind::Identifier(text)
+                }
+            }
+
+            // Control Flow
+            TokenKind::KwIf => {
+                // if <condition> then <expr> else <expr>
+                let condition = Box::new(self.parse_expression()?);
+                self.expect(TokenKind::KwThen)?;
+
+                // then and optional else.
+                let then_branch = Box::new(self.parse_expression()?);
+                let else_branch = if self.match_token(TokenKind::KwElse).is_some() {
+                    Some(Box::new(self.parse_expression()?))
+                } else {
+                    None
+                };
+
+                ExprKind::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                }
+            }
+
+            TokenKind::KwMatch => {
+                // match <subject> with { arms ... }
+                let subject = Box::new(self.parse_expression()?);
+                self.expect(TokenKind::KwWith)?;
+                self.expect(TokenKind::DelLBrace)?;
+
+                // Grab all of the arms.
+                let mut arms = Vec::new();
+
+                // Arms end at the next `}`
+                while !self.check(&TokenKind::DelRBrace) {
+                    // Pattern for this arm (required)
+                    let pattern = self.parse_pattern()?;
+
+                    // Optional if guard (if <condition>)
+                    let guard = if self.match_token(TokenKind::KwIf).is_some() {
+                        Some(Box::new(self.parse_expression()?))
+                    } else {
+                        None
+                    };
+
+                    // => body
+                    self.expect(TokenKind::FatArrow)?;
+                    let body = Box::new(self.parse_expression()?);
+                    arms.push(crate::ast::MatchArm {
+                        pattern,
+                        guard,
+                        body,
+                    });
+
+                    // Require arms to be `,` delimited
+                    if self.match_token(TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::DelRBrace)?;
+                ExprKind::Match { subject, arms }
+            }
+
+            TokenKind::KwWhile => {
+                // while <condition> do <body>
+                let condition = Box::new(self.parse_expression()?);
+                self.expect(TokenKind::KwDo)?;
+                let body = Box::new(self.parse_expression()?);
+                ExprKind::While { condition, body }
+            }
+
+            TokenKind::KwFor => {
+                // for <pattern> in <iterable> do <body>
+                let pattern = self.parse_pattern()?;
+                self.expect(TokenKind::KwIn)?;
+                let iterable = Box::new(self.parse_expression()?);
+                self.expect(TokenKind::KwDo)?;
+                let body = Box::new(self.parse_expression()?);
+                ExprKind::For {
+                    pattern,
+                    iterable,
+                    body,
+                }
+            }
+
+            // Blocks `{ ... }`
+            TokenKind::DelLBrace => {
+                let stmts = self.parse_block_contents(&TokenKind::DelRBrace)?;
+                self.expect(TokenKind::DelRBrace)?;
+                ExprKind::Block(stmts)
+            }
+
+            // Parentheses `( ... )`
+            TokenKind::DelLParen => {
+                todo!();
+
+                // I FORGOR ABOUT FUNCTION TYPES NOOO
+
+                let expr = self.parse_expression()?;
+                self.expect(TokenKind::DelRParen)?;
+                return Ok(expr);
+            }
+
+            // Arrays `[1, 2, ...xs]`
+            TokenKind::DelLBracket => {
+                // All of the elements of this array literal
+                let mut elements = Vec::new();
+                while !self.check(&TokenKind::DelRBracket) {
+                    if self.match_token(TokenKind::DotDotDot).is_some() {
+                        // Spread of some expression
+                        elements.push(crate::ast::ArrayElement::Spread(self.parse_expression()?));
+                    } else {
+                        // Normal value
+                        elements.push(crate::ast::ArrayElement::Normal(self.parse_expression()?));
+                    }
+
+                    // Array literal elements must be comma delimited.
+                    if self.match_token(TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::DelRBracket)?;
+                ExprKind::ArrayLiteral(elements)
+            }
+
+            // Jumps
+
+            // `break` & `return` have an optional value they return
+            TokenKind::KwBreak => ExprKind::Break(if self.at_statement_boundary() {
+                None
+            } else {
+                Some(Box::new(self.parse_expression()?))
+            }),
+            TokenKind::KwReturn => ExprKind::Return(if self.at_statement_boundary() {
+                None
+            } else {
+                Some(Box::new(self.parse_expression()?))
+            }),
+
+            // A value must follow `raise` and `defer`
+            TokenKind::KwRaise => ExprKind::Raise(Box::new(self.parse_expression()?)),
+            TokenKind::KwDefer => ExprKind::Defer(Box::new(self.parse_expression()?)),
+            TokenKind::KwContinue => ExprKind::Continue,
+
+            // Macros
+            TokenKind::MacroHash => ExprKind::UnhygienicIdentifier(self.expect_ident_into_inner()?),
+
+            // Slice an expression here
+            TokenKind::MacroSpliceStart => {
+                let expr = self.parse_expression()?;
+                self.expect(TokenKind::MacroSpliceEnd)?;
+                ExprKind::MacroSplice(Box::new(expr))
+            }
+
+            // Similar to function call but without type things.
+            TokenKind::MacroAt => {
+                let callee = Box::new(self.parse_postfix()?);
+                self.expect(TokenKind::DelLParen)?;
+
+                // Grab all arguments
+                let arguments = self.parse_fn_arguments()?;
+                ExprKind::MacroInvoke {
+                    macro_target: callee,
+                    arguments,
+                }
+            }
+
+            found => {
+                return Err(self.make_located(
+                    ParseError::UnexpectedNonExpressionToken { found },
+                    start_span,
+                ));
+            }
+        };
+
+        let span = start_span.join(self.previous_span());
+        Ok(self.make_located(kind, span))
+    }
+
+    /// Parse the value arguments to a function
+    ///
+    /// This is of the form of some
+    /// `(arg, arg, arg)`
+    ///
+    /// The `(` is expected to have been consumed by here.
+    fn parse_fn_arguments(&mut self) -> ParseResult<Vec<AstNode<FileName>>, FileName> {
+        // All the arguments are expressions
+        let mut arguments = Vec::new();
+
+        // Keep grabbing arguments until we hit the `)`
+        while !self.check(&TokenKind::DelRParen) {
+            arguments.push(self.parse_expression()?);
+
+            // Arguments must be `,` delimited.
+            if self.match_token(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        self.expect(TokenKind::DelRParen)?;
+
+        Ok(arguments)
     }
 }

@@ -1,10 +1,7 @@
 //! Errors that can occur during the parsing process
 
-use alloc::string::String;
 use gluon_debug::Located;
 use gluon_lexer::TokenKind;
-
-use crate::ast::AstNode;
 
 /// Result of one step of the parsing process, this is just a convenience
 /// over having to write Result<T, `LocatedParseError<FileName>`> everywhere
@@ -67,4 +64,19 @@ pub enum ParseError {
     /// 
     /// See `parse_function_like_def` for where this happens
     MacroWithReturnType,
+
+    /// A macro cannot have type parameters, as its arguments
+    /// are always just AST nodes
+    /// 
+    /// See `parse_function_like_def` for where this happens
+    MacroWithTypeParameters,
+
+    /// An invalid token appeared in a string, this shouldn't happen
+    /// as only fragments, interpolation or end should occur.
+    UnexpectedStringToken,
+
+    /// An unexpected token appeared that doesn't start a valid expression!
+    UnexpectedNonExpressionToken {
+        found: TokenKind
+    }
 }

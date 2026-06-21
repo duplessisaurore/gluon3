@@ -482,7 +482,6 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
         // See `FunctionDef` for the field meanings
         publicity: Publicity,
         name: String,
-        type_params: TypeParams<FileName>,
         params: Vec<ValueParam<FileName>>,
         body: Box<AstNode<FileName>>,
     },
