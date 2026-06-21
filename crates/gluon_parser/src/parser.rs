@@ -1265,7 +1265,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     /// This is essentially of the form:
     /// `<expr> as <Type>` or `<expr> is <Type>`
-    fn parse_typeops(&mut self, restricted: bool) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+    fn parse_typeops(&mut self) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
         // LHS
         let mut expr = self.parse_unary()?;
 
@@ -1312,5 +1312,45 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // Return our typeops expr if we have one,
         // or the unary LHS result
         Ok(expr)
+    }
+
+    /// Sadly for unary operators we need a restricted
+    /// reserved set, as else who's to say
+    /// x + 5 doesn't mean x (+5) as the unary +?
+    const UNARY_OPERATORS: &[&str] = &["-", "!"];
+
+    /// Parses a unary prefix operation
+    ///
+    /// This is essentially of the form:
+    /// `<UNARY_OPERATORS><expr>`
+    fn parse_unary(&mut self) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+        // Check if its a unary operator..
+        let looks_like_prefix_op = matches!(
+            self.peek_token().map(|t| &t.kind),
+            Some(TokenKind::Ident(text)) if UNARY_OPERATORS.contains(&text.as_str())
+        );
+
+        // We have one!
+        if looks_like_prefix_op {
+            let start_span = self.current_span();
+
+            // Parse the infix unary operator
+            let op = self
+                .parse_infix_operator()?
+                .expect("already checked the current token is a recognised unary operator");
+
+            // Parse the thing we're applying it to, safe because we've already
+            // eaten the unary op
+            let expr = Box::new(self.parse_unary()?);
+            let span = start_span.join(expr.location.span);
+
+            return Ok(self.make_located(
+                ExprKind::UnaryOp { op: Box::new(op), expr },
+                span,
+            ));
+        }
+
+        // Not a unary operator, just fall through and let postfix handle it
+        self.parse_postfix()
     }
 }
