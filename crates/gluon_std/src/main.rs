@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let lexer = Lexer::new(
         &source,
         SourceFile {
-            filename: input_path.display(),
+            filename: input_path.display().to_string(),
         }
         .into(),
     );

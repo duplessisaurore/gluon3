@@ -1,11 +1,40 @@
-//! Types for all the token types produced by the `Gluon3` lexer
+//! Types for all the parser Module & Ast types produced by the `Gluon3` parser
 
 use core::fmt::Display;
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, rc::Rc};
 use alloc::string::String;
 use alloc::vec::Vec;
-use gluon_debug::{Located};
+use gluon_debug::{Located, SourceFile};
+
+/// The root node of a single `Fermion3` source file's parsed output
+/// 
+/// This contains all the AstNodes
+#[derive(Debug, Clone, PartialEq)]
+pub struct Module<FileName: Display + Clone + PartialEq> {
+    /// The file path or identifier for this module
+    /// 
+    /// This is an Rc<> the same as all other SourceLocation's
+    /// to share it around instead.
+    pub name: Rc<SourceFile<FileName>>,
+
+    /// All `import` statements found at the top level.
+    /// 
+    /// This will be scanned in the import-resolution phase
+    pub imports: Vec<AstNode<FileName>>,
+
+    /// Top-level `type` declarations
+    pub types: Vec<AstNode<FileName>>,
+
+    /// Top-level `fn` and `macro fn` declarations
+    pub functions: Vec<AstNode<FileName>>,
+
+    /// Any executable top-level expressions
+    /// 
+    /// This is such as global `let` bindings 
+    /// or statements that run when the module is initialized)
+    pub statements: Vec<AstNode<FileName>>,
+}
 
 /// A located ExprKind
 /// 
@@ -103,7 +132,7 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
         enum_type: Box<AstNode<FileName>>,
         // Circle
         variant_name: String,
-        elements: Vec<ObjectElement<FileName>>,
+        elements: Option<Vec<ObjectElement<FileName>>>,
     },
 
     // = Blocks and Scopes =
@@ -511,7 +540,7 @@ pub enum Pattern<FileName: Display + Clone + PartialEq> {
     EnumVariant {
         enum_type: Box<AstNode<FileName>>,
         variant_name: String,
-        fields: Vec<Field<PatternNode<FileName>>>,
+        fields: Option<Vec<Field<PatternNode<FileName>>>>,
     },
 
     /// A quoted AST section that we attempt to match in a macro `match`.
