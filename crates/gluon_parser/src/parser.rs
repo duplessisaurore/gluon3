@@ -1042,7 +1042,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 self.advance()?;
 
                 // Parse RHS
-                let value = self.parse_expression()?;
+                let value = self.parse_assignment()?;
 
                 // Total span will be left to the right
                 let span = left.location.span.join(value.location.span);
@@ -1074,5 +1074,45 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // No assignment here, return pipeline result.
         Ok(left)
+    }
+
+
+    /// Parses a pipeline chain
+    ///
+    /// This is essentially of the form:
+    /// `<expr> |> <receiver_fn> <|> <reciever fn>*`
+    fn parse_pipeline(&mut self, restricted: bool) -> ParseResult<AstNode<FileName>, FileName> {
+        // Parse the expression we are plugging into the pipeline
+        let mut expr = self.parse_binary()?;
+
+        // Parse the pipeline chain
+        loop {
+            // At a statement boundary we exit (pipeline over)
+            if self.at_statement_boundary() {
+                break;
+            };
+
+            // Else we continue with pipelines while we can see some!
+            if self.match_token(TokenKind::PipeArrow).is_some() {
+                // RHS reciever
+                let right = self.parse_binary()?;
+
+                // make pipeline with the current expr iteratively (left associative) 
+                let span = expr.location.span.join(right.location.span);
+                expr = self.make_located(
+                    ExprKind::Pipeline {
+                        left: Box::new(expr),
+                        right: Box::new(right),
+                    },
+                    span,
+                );
+            } else {
+                break;
+            }
+        }
+
+        // Return our pipeline expr if we have one,
+        // or the binary result
+        Ok(expr)
     }
 }
