@@ -16,6 +16,22 @@ use crate::{ast::{AstNode, Module}, errors::{LocatedParseError, ParseError, Pars
 /// and resetting to it
 struct Mark(usize);
 
+/// The function kind which can either
+/// be some Function/Closure or a Macro
+#[derive(PartialEq, Eq)]
+/// to parse
+pub enum FunctionKind {
+    Function,
+    Macro
+}
+
+/// The publicity of this element
+#[derive(PartialEq, Eq)]
+pub enum Publicity {
+    Public,
+    Private
+}
+
 /// The actual parser class itself
 pub struct Parser<FileName: Display + Clone + PartialEq> {
     /// The stream of tokens produced by the Lexer
@@ -281,7 +297,12 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // statements (TLS) which may or may not be public.
         while !self.is_at_end() {
             // Check if this TLS is public or not. 
-            let is_pub = self.match_token(TokenKind::KwPub).is_some();
+            let publicity = match self.match_token(TokenKind::KwPub) {
+                Some(_) => Publicity::Public,
+
+                // Default is private.
+                None => Publicity::Private,
+            };
             let next_kind = self.peek_token().map(|token| token.kind.clone());
 
             
@@ -290,7 +311,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             match next_kind {
                 Some(TokenKind::KwImport) => {
                     // Imports cannot be made "public"/rexported.
-                    if is_pub {
+                    if publicity != Publicity::Private {
                         return Err(self.make_located(
                             ParseError::PublicModifierOnImport,
                             self.current_span(),
@@ -300,22 +321,22 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     module.imports.push(self.parse_import()?);
                 }
                 Some(TokenKind::KwType) => {
-                    module.types.push(self.parse_type_def(is_pub)?);
+                    module.types.push(self.parse_type_def(publicity)?);
                 }
                 Some(TokenKind::KwFn) => {
-                    module.functions.push(self.parse_function_like_def(is_pub, false)?);
+                    module.functions.push(self.parse_function_like_def(publicity, FunctionKind::Function)?);
                 }
                 Some(TokenKind::KwMacro) => {
                     self.advance()?;
                     self.expect(TokenKind::KwFn)?;
-                    module.macros.push(self.parse_function_like_def(is_pub, true)?);
+                    module.macros.push(self.parse_function_like_def(publicity, FunctionKind::Macro)?);
                 }
                 Some(TokenKind::KwLet) => {
-                    module.statements.push(self.parse_let_binding(is_pub)?);
+                    module.statements.push(self.parse_let_binding(publicity)?);
                 }
                 _ => {
                     // General statements which are just executed cannot be made public either
-                    if is_pub {
+                    if publicity != Publicity::Private {
                         return Err(self.make_located(
                             ParseError::PublicModifierOnGenericStatement,
                             self.current_span(),
@@ -356,5 +377,24 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             self.expect_separator_or_terminator(terminator)?;
         }
         Ok(stmts)
+    }
+
+    /// Parses a single statement at the current position,
+    /// 
+    /// All produced `AstNodes` are set to `Publicity::Private` 
+    /// and publicity of statements is not considered.
+    pub fn parse_statement(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        if self.match_token(TokenKind::KwLet).is_some() {
+            self.parse_let_binding(Publicity::Private)
+        } else if self.match_token(TokenKind::KwType).is_some() {
+            self.parse_type_def(Publicity::Private)
+        } else if self.match_token(TokenKind::KwFn).is_some() {
+            self.parse_function_like_def(Publicity::Private, FunctionKind::Function)
+        } else if self.match_token(TokenKind::KwMacro).is_some() {
+            self.expect(TokenKind::KwFn)?;
+            self.parse_function_like_def(Publicity::Private, FunctionKind::Macro)
+        } else {
+            self.parse_expression(Publicity::Private)
+        }
     }
 }
