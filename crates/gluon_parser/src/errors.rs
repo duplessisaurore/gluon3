@@ -62,4 +62,11 @@ pub enum ParseError {
     /// including it as part of the syntax which is doing
     /// too much for patterns that should be simple.
     MoreThanOneArrayPatternSpread,
+
+    /// A macro cannot have a return type, as it is inherently
+    /// always got the same AST macroey return type, so to prevent
+    /// confusion we explicitly error
+    /// 
+    /// See `parse_function_like_def` for where this happens
+    MacroWithReturnType,
 }

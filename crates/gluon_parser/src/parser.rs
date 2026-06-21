@@ -12,7 +12,8 @@ use gluon_lexer::{Token, TokenKind};
 
 use crate::{
     ast::{
-        AstNode, ExprKind, Field, Literal, Module, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
+        AstNode, ExprKind, Field, Literal, Module, Pattern, PatternNode, PatternObjectLikeFields,
+        Publicity, TypeParams,
     },
     errors::{LocatedParseError, ParseError, ParseResult},
 };
@@ -681,10 +682,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     /// Note that where, fail and with can go anywhere but there can only be one of each "block".
     /// See the `Fermion3` specification for more examples/specifics.
-    fn parse_type_def(
-        &mut self,
-        publicity: Publicity,
-    ) -> ParseResult<AstNode<FileName>, FileName> {
+    fn parse_type_def(&mut self, publicity: Publicity) -> ParseResult<AstNode<FileName>, FileName> {
         // Store the start for the full type definition span.
         let start_span = self.previous_span();
 
@@ -794,7 +792,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
     /// Tries to parse type parameters in the definition
     /// of some parametric typed thing
-    /// 
+    ///
     /// This takes the form of `<type: constraints/types, etc..>`
     /// where we expect that the left angle delim has not yet been eated.
     pub fn parse_type_parameters(&mut self) -> ParseResult<TypeParams<FileName>, FileName> {
@@ -817,7 +815,10 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 None
             };
 
-            params.push(Field { name, payload: annotation });
+            params.push(Field {
+                name,
+                payload: annotation,
+            });
 
             // type parameters must be `,` comma delimited.
             if self.match_token(TokenKind::Comma).is_none() {
@@ -827,5 +828,126 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         self.expect(TokenKind::DelRAngle)?;
         Ok(params)
+    }
+
+    /// Parses a function-like definition (functions or macros)
+    ///
+    /// This is essentially of the form:
+    /// `<macro? (consumed) >fn <name?><type params>(<params>) -> <ret type> => <block>`
+    fn parse_function_like_def(
+        &mut self,
+        publicity: Publicity,
+        kind: FunctionKind,
+    ) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.previous_span();
+
+        // Check first for the optional name
+        let name = match kind {
+            // Optional name for functions since we have closures
+            FunctionKind::Function => {
+                if let Some(TokenKind::Ident(_)) = self.peek_token().map(|t| &t.kind) {
+                    Some(self.expect_ident_into_inner()?)
+                } else {
+                    None
+                }
+            }
+
+            // Mandatory for macros.
+            FunctionKind::Macro => Some(self.expect_ident_into_inner()?),
+        };
+
+        // Type Parameters `<Type: Constraints/Types, ...>`
+        let type_params = if self.match_token(TokenKind::DelLAngle).is_some() {
+            self.parse_type_parameters()?
+        } else {
+            // Empty by default (no type params)
+            Vec::new()
+        };
+
+        // Value Parameters `(Pattern: Type, ...)`
+        self.expect(TokenKind::DelLParen)?;
+
+        // Empty by default (no params)
+        let mut params = Vec::new();
+
+        // Match until the end `)`
+        while !self.check(&TokenKind::DelRParen) {
+            // The param name is bound, so a pattern here to permit for destructuring and things.
+            let param_pat = self.parse_pattern()?;
+
+            // Check for annotation
+            let annotation = if self.match_token(TokenKind::Colon).is_some() {
+                Some(Box::new(self.parse_expression()?))
+            } else {
+                None
+            };
+            params.push(crate::ast::ValueParam {
+                name: param_pat,
+                annotation,
+            });
+
+            // Params are delimited by `,` commas.
+            if self.match_token(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        self.expect(TokenKind::DelRParen)?;
+
+        // Return Type `-> Type` before the block.
+        let return_type = match kind {
+            // Functions have a return type
+            FunctionKind::Function => {
+                if self.match_token(TokenKind::ThinArrow).is_some() {
+                    Some(Box::new(self.parse_expression()?))
+                } else {
+                    None
+                }
+            }
+
+            // Macros always return some AstNode thingy, so there's no real
+            // reason to have return types here
+            //
+            // To prevent confusion we just explicitly error.
+            FunctionKind::Macro => {
+                if self.match_token(TokenKind::ThinArrow).is_some() {
+                    return Err(
+                        self.make_located(ParseError::MacroWithReturnType, self.previous_span())
+                    );
+                } else {
+                    None
+                }
+            }
+        };
+
+        // Body
+        self.expect(TokenKind::FatArrow)?;
+        let body = Box::new(self.parse_expression()?);
+
+        let span = start_span.join(self.previous_span());
+
+        // Depending on the kind of function we have differing defs
+        Ok(self.make_located(
+            match kind {
+                FunctionKind::Function => ExprKind::FunctionDef {
+                    publicity,
+                    name,
+                    type_params,
+                    params,
+                    return_type,
+                    body,
+                },
+
+                FunctionKind::Macro => ExprKind::MacroDef {
+                    publicity,
+                    // This should be handled by the above function
+                    name: name
+                        .expect("name should be not None here because None was handled already"),
+                    type_params,
+                    params,
+                    body,
+                },
+            },
+            span,
+        ))
     }
 }
