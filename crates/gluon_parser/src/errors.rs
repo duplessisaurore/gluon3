@@ -78,5 +78,9 @@ pub enum ParseError {
     /// An unexpected token appeared that doesn't start a valid expression!
     UnexpectedNonExpressionToken {
         found: TokenKind
-    }
+    },
+
+    /// An unexpected tuple was here (likely a function param type)
+    /// There are no tuples so this is invalid!
+    UnexpectedTuple,
 }

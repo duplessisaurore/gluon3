@@ -1215,7 +1215,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// `<expr> |> <receiver_fn> <|> <reciever fn>*`
     fn parse_pipeline(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         // Parse the expression we are plugging into the pipeline
-        let mut expr = self.parse_binary()?;
+        let mut expr = self.parse_function_type()?;
 
         // Parse the pipeline chain
         loop {
@@ -1227,7 +1227,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // Else we continue with pipelines while we can see some!
             if self.match_token(TokenKind::PipeArrow).is_some() {
                 // RHS reciever
-                let right = self.parse_binary()?;
+                let right = self.parse_function_type()?;
 
                 // make pipeline with the current expr iteratively (left associative)
                 let span = expr.location.span.join(right.location.span);
@@ -1643,7 +1643,18 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             TokenKind::LitUInt(n) => ExprKind::Lit(Literal::UInt(n)),
             TokenKind::LitFloat(n) => ExprKind::Lit(Literal::Float(n)),
             TokenKind::LitBool(b) => ExprKind::Lit(Literal::Bool(b)),
-            TokenKind::LitUnit => ExprKind::Lit(Literal::Unit),
+            TokenKind::LitUnit => {
+                if self.match_token(TokenKind::ThinArrow).is_some() {
+                    // `() -> <return>` is a zero parameter function type rather than being a Unit lit
+                    let return_type = Box::new(self.parse_expression()?);
+                    ExprKind::FunctionType {
+                        params: Vec::new(),
+                        return_type,
+                    }
+                } else {
+                    ExprKind::Lit(Literal::Unit)
+                }
+            }
 
             // Strings with interpolation handled
             TokenKind::StrStart => {
@@ -1807,14 +1818,45 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             }
 
             // Parentheses `( ... )`
+            //
+            // This can be a grouped expression or the param list
+            // of a function type
             TokenKind::DelLParen => {
-                todo!();
+                // Parse all elements in the parens `(` `)`
+                let mut items = Vec::new();
+                if !self.check(&TokenKind::DelRParen) {
+                    loop {
+                        items.push(self.parse_expression()?);
 
-                // I FORGOR ABOUT FUNCTION TYPES NOOO
-
-                let expr = self.parse_expression()?;
+                        // Function param list types must be `,` comma delimited.
+                        if self.match_token(TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                }
                 self.expect(TokenKind::DelRParen)?;
-                return Ok(expr);
+
+                // Check if it is a function type
+                if self.match_token(TokenKind::ThinArrow).is_some() {
+                    // `(<params>) -> <return>`
+                    let return_type = Box::new(self.parse_expression()?);
+                    ExprKind::FunctionType {
+                        params: items,
+                        return_type,
+                    }
+                } else {
+                    // Not a function type, there are no tuples
+                    // so this is invalid if > 1 item.
+                    match items.len() {
+                        1 => return Ok(items.into_iter().next().expect("just checked len is 1")),
+                        _ => {
+                            return Err(self.make_located(
+                                ParseError::UnexpectedTuple,
+                                self.current_span(),
+                            ));
+                        }
+                    }
+                }
             }
 
             // Arrays `[1, 2, ...xs]`
@@ -1915,5 +1957,45 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         self.expect(TokenKind::DelRParen)?;
 
         Ok(arguments)
+    }
+
+    /// Parses a function type
+    ///
+    /// This is essentially of the form:
+    /// `<param-type> -> <return-type>`
+    ///
+    /// The parenthesised mutli parameter form is `(Int, Int) -> Int`
+    ///
+    /// `() -> Int` is handled inside `parse_atom`, since only a
+    /// parenthesised group can hold more than one param
+    ///
+    /// This level only handles the bare single-param form `Int -> Int`
+    ///
+    /// This is right associative.
+    fn parse_function_type(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.current_span();
+        // LHS
+        let left = self.parse_binary()?;
+
+        // Check for function type arrow
+        if self.match_token(TokenKind::ThinArrow).is_some() {
+            // Parse the RHS
+            let return_type = Box::new(self.parse_function_type()?);
+            let span = start_span.join(self.previous_span());
+
+            // The LHS is the params that produce this return type
+            let mut params = Vec::new();
+            params.push(left);
+
+            return Ok(self.make_located(
+                ExprKind::FunctionType {
+                    params,
+                    return_type,
+                },
+                span,
+            ));
+        }
+
+        Ok(left)
     }
 }
