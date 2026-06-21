@@ -1256,6 +1256,61 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             current_op_identity = Some(op_identity);
         }
 
+        // Return our binary op expr if we have one,
+        // or the typeops result
         Ok(left)
+    }
+
+    /// Parses type operations
+    ///
+    /// This is essentially of the form:
+    /// `<expr> as <Type>` or `<expr> is <Type>`
+    fn parse_typeops(&mut self, restricted: bool) -> Result<AstNode<FileName>, LocatedParseError<FileName>> {
+        // LHS
+        let mut expr = self.parse_unary()?;
+
+        loop {
+            // At boundary, dont consume any more
+            if self.at_statement_boundary() {
+                break;
+            }
+
+            // `as <Type>`
+            if self.match_token(TokenKind::KwAs).is_some() {
+                let target_type = self.parse_unary()?;
+                let span = expr.location.span.join(target_type.location.span);
+
+                // fold RHS type
+                expr = self.make_located(
+                    ExprKind::TypeCast {
+                        expr: Box::new(expr),
+                        target_type: Box::new(target_type),
+                    },
+                    span,
+                );
+
+            // `is <Type>`
+            } else if self.match_token(TokenKind::KwIs).is_some() {
+                let target_type = self.parse_unary()?;
+                let span = expr.location.span.join(target_type.location.span);
+
+                // fold RHS type
+                expr = self.make_located(
+                    ExprKind::TypeCheck {
+                        expr: Box::new(expr),
+                        target_type: Box::new(target_type),
+                    },
+                    span,
+                );
+
+            // no more chain
+            } else {
+                break;
+            }
+        }
+
+        // Return our typeops expr if we have one,
+        // or the unary LHS result
+        Ok(expr)
     }
 }
