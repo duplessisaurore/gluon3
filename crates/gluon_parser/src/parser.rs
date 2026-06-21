@@ -950,4 +950,47 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             span,
         ))
     }
+
+
+    /// Parses a let binding
+    ///
+    /// This is essentially of the form:
+    /// `let <mut?> <name/pattern> <: annotation> = <rvalue expr>`
+    /// 
+    /// We assume the `let` keyword has already been consumed.
+    /// 
+    /// my head HURTSSSS owwww
+    fn parse_let_binding(&mut self, publicity: Publicity) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.previous_span();
+
+        // Check if a `mut` follows the `let`
+        let is_mutable = self.match_token(TokenKind::KwMut).is_some();
+
+        // Parse the pattern to allow for destructuring
+        let pattern = self.parse_pattern()?;
+
+        // Optional annotation for guarding.
+        let annotation = if self.match_token(TokenKind::Colon).is_some() {
+            Some(Box::new(self.parse_expression()?))
+        } else {
+            None
+        };
+
+        // we must bind to some initialiser!
+        // uninitialised bindings are a crime.. imo :P
+        self.expect(TokenKind::Equal)?;
+        let initializer = Box::new(self.parse_expression()?);
+
+        let span = start_span.join(self.previous_span());
+        Ok(self.make_located(
+            ExprKind::LetBinding {
+                publicity,
+                is_mutable,
+                pattern,
+                annotation,
+                initializer,
+            },
+            span,
+        ))
+    }
 }
