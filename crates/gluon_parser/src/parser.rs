@@ -12,6 +12,10 @@ use gluon_lexer::{Token, TokenKind};
 
 use crate::errors::{LocatedParseError, ParseError};
 
+/// A mark which allows for storing the current position
+/// and resetting to it
+struct Mark(usize);
+
 /// The actual parser class itself
 pub struct Parser<FileName: Display + Clone + PartialEq> {
     /// The stream of tokens produced by the Lexer
@@ -161,5 +165,17 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// the previous `Token`'s span
     fn unexpected_eof(&self) -> LocatedParseError<FileName> {
         self.make_located(ParseError::UnexpectedEof, self.previous_span())
+    }
+
+    /// Returns the current location of the `Parser` that can
+    /// be reset to by reset(mark)
+    fn mark(&self) -> Mark {
+        Mark(self.cursor)
+    }
+
+    /// Resets the position of the cursor to the location
+    /// specified by the Mark
+    fn reset(&mut self, mark: Mark) {
+        self.cursor = mark.0
     }
 }
