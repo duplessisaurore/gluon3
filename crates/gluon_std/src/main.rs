@@ -34,7 +34,8 @@ struct Cli {
     output: PathBuf,
 
     /// Included directories for other files
-    includes: Vec<PathBuf>,
+    #[arg(short, long)]
+    include: Vec<PathBuf>,
 }
 
 pub struct StdLoader {
@@ -47,7 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let input_path = &cli.input;
     let _output_path = &cli.output;
-    let included_dirs = cli.includes;
+    let included_dirs = cli.include;
 
     // Read source file
     let source = fs::read_to_string(input_path).unwrap_or_else(|e| {
