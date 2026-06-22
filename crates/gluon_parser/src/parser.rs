@@ -396,7 +396,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                             self.current_span(),
                         ));
                     }
-                    module.statements.push(self.parse_statement()?);
+                    module.statements.push(self.parse_expression()?);
                 }
             }
 
@@ -420,7 +420,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         let mut stmts = Vec::new();
 
         while !self.check(terminator) && !self.is_at_end() {
-            stmts.push(self.parse_statement()?);
+            stmts.push(self.parse_expression()?);
 
             // Each statement should be followed by the separator `;`,
             // or be the final statement in which case is followed by the
@@ -431,25 +431,6 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             self.expect_separator_or_terminator(terminator)?;
         }
         Ok(stmts)
-    }
-
-    /// Parses a single statement at the current position,
-    ///
-    /// All produced `AstNodes` are set to `Publicity::Private`
-    /// and publicity of statements is not considered.
-    pub fn parse_statement(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
-        if self.match_token(TokenKind::KwLet).is_some() {
-            self.parse_let_binding(Publicity::Private)
-        } else if self.match_token(TokenKind::KwType).is_some() {
-            self.parse_type_def(Publicity::Private)
-        } else if self.match_token(TokenKind::KwFn).is_some() {
-            self.parse_function_like_def(Publicity::Private, FunctionKind::Function)
-        } else if self.match_token(TokenKind::KwMacro).is_some() {
-            self.expect(TokenKind::KwFn)?;
-            self.parse_function_like_def(Publicity::Private, FunctionKind::Macro)
-        } else {
-            self.parse_expression()
-        }
     }
 
     /// Parses an `import <path> [as <alias>]` statement at the current position
@@ -2042,6 +2023,22 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     macro_target: callee,
                     arguments,
                 }
+            },
+
+            // Statements are also valid expressions since everything is an expression blehhh
+            // just use the statement helpers and extract the kinds.
+            TokenKind::KwLet => {
+                self.parse_let_binding(Publicity::Private)?.kind
+            }
+            TokenKind::KwType => {
+                self.parse_type_def(Publicity::Private)?.kind
+            }
+            TokenKind::KwFn => {
+                self.parse_function_like_def(Publicity::Private, FunctionKind::Function)?.kind
+            }
+            TokenKind::KwMacro => {
+                self.expect(TokenKind::KwFn)?;
+                self.parse_function_like_def(Publicity::Private, FunctionKind::Macro)?.kind
             }
 
             found => {
