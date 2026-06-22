@@ -495,7 +495,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     let variant_name = self.expect_ident_into_inner()?;
 
                     // If there is no LBrace then this is a fieldless variant e.g Option.None
-                    let fields = if self.match_token(TokenKind::DelLBrace).is_some() {
+                    let fields = if self.check(&TokenKind::DelLBrace) {
                         // Fields for enum are essentially just an object..
                         Some(self.parse_object_pattern_field_list()?)
                     } else {
