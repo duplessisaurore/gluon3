@@ -13,6 +13,9 @@ pub type LexResult<FileName> = Result<Token<FileName>, LexError>;
 /// Errors that can occur while lexing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LexError {
+    /// An unexpected character was here
+    UnexpectedCharacter { at: Span, character: char },
+
     /// An unterminated string literal
     ///
     /// hit EOF before the closing `"`.

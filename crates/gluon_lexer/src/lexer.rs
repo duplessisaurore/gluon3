@@ -3,7 +3,7 @@
 //! This translates the source file content into the tokens
 //! specified by `TokenKind` for one source
 
-use core::{fmt::Display, str::Chars};
+use core::{fmt::{Display, Debug}, str::Chars};
 
 use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
@@ -60,7 +60,7 @@ enum LexerMode {
 ///
 /// This dictates the current execution "mode", see
 /// `LexerMode` for explanation on each mode.
-pub struct Lexer<'src, FileName: Display + Clone> {
+pub struct Lexer<'src, FileName: Display + Clone + Debug> {
     /// The source file content we are currently lexing
     ///
     /// We need to keep this around for calculating the
@@ -84,7 +84,7 @@ pub struct Lexer<'src, FileName: Display + Clone> {
     modes: Vec<LexerMode>,
 }
 
-impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
+impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> {
     /// Create a new lexer over `source` that will lex all of the
     /// textual contents into `Tokens`
     ///
@@ -562,6 +562,15 @@ impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
                     });
                 }
             }
+        }
+
+        // Any left over reserved character cant be an ident
+        // or a reserved kwd, so its unexpected here.
+        if Self::is_reserved(c) {
+            return Err(LexError::UnexpectedCharacter {
+                at: self.span_from(start),
+                character: c,
+            });
         }
 
         // Since whitespace, delimiters, macros, strings, and numbers are handled,
