@@ -34,7 +34,7 @@ struct Cli {
     output: PathBuf,
 
     /// Included directories for other files
-    includes: Vec<PathBuf>
+    includes: Vec<PathBuf>,
 }
 
 pub struct StdLoader {
@@ -84,10 +84,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Load all dependent modules
-    let loader = ModuleLoader::new(ast, StdLoader {
-        cwd: std::env::current_dir()?,
-        included_dirs
-    });
+    let loader = ModuleLoader::new(
+        ast,
+        StdLoader {
+            cwd: std::env::current_dir()?,
+            included_dirs,
+        },
+    );
 
     let resolved_graph = loader.resolve_modules().unwrap_or_else(|e| {
         eprintln!("module resolving error: {:?}", e);
@@ -112,48 +115,67 @@ pub enum ResolveModuleError {
 }
 
 impl LoadModule<String> for StdLoader {
-    type ResolveSourceError =  ResolveModuleError;
+    type ResolveSourceError = ResolveModuleError;
 
-    fn resolve_source_file<'path>(&mut self, path: &'path str) -> Result<SourceFile<String>, Self::ResolveSourceError> {
+    fn resolve_source_file<'path>(
+        &mut self,
+        path: &'path str,
+    ) -> Result<SourceFile<String>, Self::ResolveSourceError> {
         let this_path = PathBuf::from(path);
 
         // Check if this simply exists in the included dirs
-        Ok(match self.included_dirs.iter().try_find(|included_dir| {
-            // Push this path and see if it exists..
-            let mut test_included = (*included_dir).clone();
-            test_included.push(this_path.clone());
+        Ok(
+            match self
+                .included_dirs
+                .iter()
+                .try_find(|included_dir| {
+                    // Push this path and see if it exists..
+                    let mut test_included = (*included_dir).clone();
+                    test_included.push(this_path.clone());
 
-            test_included
-                .try_exists()
-                .map_err(|error| ResolveModuleError::TestingFileExists { error })
-        })? {
-            Some(file_path) => SourceFile {
-                filename: file_path.to_string_lossy().to_string(),
-            },
 
-            // Absolutize and assume it must be in the current dir
-            // since it didnt exist in any of our included dirs
-            None => {
-                let mut cleaned_path = self.cwd.clone();
-                cleaned_path.push(this_path);
-
-                // Clean up the path to clean up all .., ~
-                let cleaned_path = cleaned_path
-                    .clean_path()
-                    .map_err(|error| ResolveModuleError::CleanPathError { error })?;
-
-                // And now this is our source file
-                SourceFile {
-                    filename: cleaned_path.to_string_lossy().to_string(),
+                    test_included
+                        .try_exists()
+                        .map_err(|error| ResolveModuleError::TestingFileExists { error })
+                })
+                .map(|path| {
+                    // Since we are only using try_find, we need to
+                    // re-map this_path onto the valid path before handling
+                    // it if it exists at all.
+                    if let Some(path) = path {
+                        let mut valid_path = path.clone();
+                        valid_path.push(this_path.clone());
+                        return Some(valid_path);
+                    }
+                    path.cloned()
+                })? {
+                Some(file_path) => {
+                    SourceFile {
+                        filename: file_path.to_string_lossy().to_string(),
+                    }
                 }
-            }
-        })
+
+                // Absolutize and assume it must be in the current dir
+                // since it didnt exist in any of our included dirs
+                None => {
+                    let mut cleaned_path = self.cwd.clone();
+                    cleaned_path.push(this_path);
+
+                    // Clean up the path to clean up all .., ~
+                    let cleaned_path = cleaned_path
+                        .clean_path()
+                        .map_err(|error| ResolveModuleError::CleanPathError { error })?;
+
+                    // And now this is our source file
+                    SourceFile {
+                        filename: cleaned_path.to_string_lossy().to_string(),
+                    }
+                }
+            },
+        )
     }
 
-    fn load_module_from_path<'path>(
-        &mut self,
-        path: &'path SourceFile<String>,
-    ) -> Option<String> {
+    fn load_module_from_path<'path>(&mut self, path: &'path SourceFile<String>) -> Option<String> {
         // Read its path..
         let path = PathBuf::from(&path.filename);
 
