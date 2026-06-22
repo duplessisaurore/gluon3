@@ -8,7 +8,7 @@ use core::fmt::{Debug as DebugTrait, Display};
 
 use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
-use gluon_lexer::{Token, TokenKind};
+use gluon_lexer::{Token, TokenKind::{self}};
 
 use crate::{
     ast::{
@@ -1846,7 +1846,10 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
                     // Optional if guard (if <condition>)
                     let guard = if self.match_token(TokenKind::KwIf).is_some() {
-                        Some(Box::new(self.parse_expression()?))
+                        let guard_expr = Some(Box::new(self.parse_expression()?));
+                        // Optional then between the if and =>
+                        let _ = self.match_token(TokenKind::KwThen);
+                        guard_expr
                     } else {
                         None
                     };
