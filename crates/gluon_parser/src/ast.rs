@@ -460,14 +460,14 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// `object { x: Float, y: Float }`
     /// 
     /// This is used for declarations of new objects
-    ObjectType {
+    ObjectTypeDef {
         fields: Vec<ObjectFieldDef<FileName>>,
     },
 
     /// `enum { Circle { radius: Float }, Point }`
     /// 
     /// This is used for declarations of new enums
-    EnumType {
+    EnumTypeDef {
         variants: Vec<EnumVariantDef<FileName>>,
     },
 

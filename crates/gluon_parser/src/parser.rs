@@ -12,8 +12,7 @@ use gluon_lexer::{Token, TokenKind};
 
 use crate::{
     ast::{
-        AstNode, ExprKind, Field, Literal, Module, ObjectElement, Pattern, PatternNode,
-        PatternObjectLikeFields, Publicity, TypeParams,
+        AstNode, EnumVariantDef, ExprKind, Field, Literal, Module, ObjectElement, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
     },
     errors::{LocatedParseError, ParseError, ParseResult},
 };
@@ -708,11 +707,17 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             Vec::new()
         };
 
-        // Parse the = <node> which is any expression
+        // Parse the = <node> which is any expression or a object/enum type definition
         //
         // types are values so a type is produced by an expression.
         self.expect(TokenKind::Equal)?;
-        let mut node = self.parse_type_expression()?;
+        let mut node = if self.check(&TokenKind::KwObject) {
+            self.parse_object_type_def()?
+        } else if self.check(&TokenKind::KwEnum) {
+            self.parse_enum_type_def()?
+        } else {
+            self.parse_type_expression()?
+        };
 
         // Check in a loop for all the additions
         // `where`, `fail`, `with`.
@@ -810,6 +815,28 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             },
             span,
         ))
+    }
+
+    /// Parses an `object { field: Type, ... }` type definition
+    /// 
+    /// Only valid as the direct RHS of a `type` definition.
+    fn parse_object_type_def(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.expect(TokenKind::KwObject)?.location.span;
+        self.expect(TokenKind::DelLBrace)?;
+        let fields = self.parse_type_object_field_list()?;
+        let span = start_span.join(self.previous_span());
+        Ok(self.make_located(ExprKind::ObjectTypeDef { fields }, span))
+    }
+
+    /// Parses an `enum { Variant, Variant { field: Type, ... }, ... }` type definition
+    /// 
+    /// Only valid as the direct RHS of a `type` definition.
+    fn parse_enum_type_def(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.expect(TokenKind::KwEnum)?.location.span;
+        self.expect(TokenKind::DelLBrace)?;
+        let variants = self.parse_enum_variant_list()?;
+        let span = start_span.join(self.previous_span());
+        Ok(self.make_located(ExprKind::EnumTypeDef { variants }, span))
     }
 
     /// Tries to parse type parameters in the definition
@@ -1989,7 +2016,6 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 }
             }
 
-
             // Macros
             TokenKind::MacroHash => ExprKind::UnhygienicIdentifier(self.expect_ident_into_inner()?),
 
@@ -2093,5 +2119,64 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         }
 
         Ok(left)
+    }
+
+    /// Parses an object type `object { name: Type, ... }` for object type defs.
+    /// 
+    /// Assumes the `{` has already been consumed.
+    fn parse_type_object_field_list(&mut self) -> ParseResult<Vec<Field<Box<AstNode<FileName>>>>, FileName> {
+        // Grab each field until the end
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::DelRBrace) {
+
+            // Name of the field
+            let name = self.expect_ident_into_inner()?;
+
+            // The object field must have some type
+            self.expect(TokenKind::Colon)?;
+            let field_type = self.parse_type_expression()?;
+
+            // Add new field
+            fields.push(Field { name, payload: Box::new(field_type) });
+
+            // We require fields to be `,` comma delimited.
+            if self.match_token(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        self.expect(TokenKind::DelRBrace)?;
+        Ok(fields)
+    }
+
+    /// Parses `enum { Variant, Variant { field: Type, ... }, ... }` for enum type defs.
+    /// 
+    /// Assumes the `{` has already been consumed.
+    fn parse_enum_variant_list(&mut self) -> ParseResult<Vec<EnumVariantDef<FileName>>, FileName> {
+        // Get all variants for this enum's def
+        let mut variants = Vec::new();
+
+        // Variants are terminated by a }
+        while !self.check(&TokenKind::DelRBrace) {
+            // Each variant must have some name
+            let name = self.expect_ident_into_inner()?;
+
+            // Does the variant have fields? if so get em too nyaa~ :3
+            let fields = if self.match_token(TokenKind::DelLBrace).is_some() {
+                Some(self.parse_type_object_field_list()?)
+            } else {
+                None
+            };
+
+            // Add to variants
+            variants.push(EnumVariantDef { name, fields });
+
+            // We require variants to be `,` delimited.
+            if self.match_token(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+
+        self.expect(TokenKind::DelRBrace)?;
+        Ok(variants)
     }
 }
