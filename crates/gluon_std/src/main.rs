@@ -146,6 +146,12 @@ impl LoadModule<String> for StdLoader {
                     if let Some(path) = path {
                         let mut valid_path = path.clone();
                         valid_path.push(this_path.clone());
+                        
+                        // And since we may have .. or whatever try clean up the path
+                        if let Ok(cleaned_path) = valid_path.clean_path() {
+                            valid_path = cleaned_path;
+                        }
+
                         return Some(valid_path);
                     }
                     path.cloned()
