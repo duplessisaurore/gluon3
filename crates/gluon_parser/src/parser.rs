@@ -1975,12 +1975,12 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // Jumps
 
             // `break` & `return` have an optional value they return
-            TokenKind::KwBreak => ExprKind::Break(if self.at_statement_boundary() {
+            TokenKind::KwBreak => ExprKind::Break(if self.at_expression_boundary() {
                 None
             } else {
                 Some(Box::new(self.parse_expression()?))
             }),
-            TokenKind::KwReturn => ExprKind::Return(if self.at_statement_boundary() {
+            TokenKind::KwReturn => ExprKind::Return(if self.at_expression_boundary() {
                 None
             } else {
                 Some(Box::new(self.parse_expression()?))
@@ -2196,5 +2196,14 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         self.expect(TokenKind::DelRBrace)?;
         Ok(variants)
+    }
+
+    /// Returns whether or not we are at the boundary
+    /// for an expression 
+    /// 
+    /// This is mainly for break and return to tell if
+    /// there is actually an expression following it or not
+    fn at_expression_boundary(&self) -> bool {
+        self.at_statement_boundary() || self.check(&TokenKind::Comma) || self.check(&TokenKind::DelRBrace)
     }
 }
