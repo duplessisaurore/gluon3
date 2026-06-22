@@ -6,9 +6,20 @@
 
 use core::fmt::Display;
 
+use alloc::rc::Rc;
+use gluon_debug::SourceFile;
 use gluon_parser::ast::Module;
+use hashbrown::HashMap;
 
 use crate::LoadModule;
+
+/// The fully resolved dependency graph output of the `ModuleLoader`
+#[derive(Debug)]
+pub struct ResolvedGraph<FileName: Display + Clone + PartialEq> {
+    /// This is a mapping of the name of the file
+    /// to its actual `Module` which has been loaded and parsed.
+    modules: HashMap<Rc<SourceFile<FileName>>, Module<FileName>> 
+}
 
 /// The actual module loader type itself
 pub struct ModuleLoader<FileName: Display + Clone + PartialEq, Loader: LoadModule<FileName>> {
@@ -29,4 +40,6 @@ impl<FileName: Display + Clone + PartialEq, Loader: LoadModule<FileName>> Module
             loader
         }
     }
+
+    
 }

@@ -28,3 +28,8 @@ pub use load_trait::LoadModule;
 /// resolved module graph/tree with deps resolved
 pub mod resolver;
 pub use resolver::ModuleLoader;
+
+/// Error types/result that can occur during module
+/// resolving
+pub mod errors;
+pub use errors::ModuleResolveError;

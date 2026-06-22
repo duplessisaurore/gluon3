@@ -3,7 +3,10 @@
 //! This translates the source file content into the tokens
 //! specified by `TokenKind` for one source
 
-use core::{fmt::{Display, Debug}, str::Chars};
+use core::{
+    fmt::{Debug, Display},
+    str::Chars,
+};
 
 use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
@@ -104,7 +107,11 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
 
     /// Returns a new Located<T> for the kind with a source span in the current
     /// stored file of the `Lexer`.
-    fn make_located<T: Clone + PartialEq>(&self, kind: T, source_span: Span) -> Located<T, FileName> {
+    fn make_located<T: Clone + PartialEq>(
+        &self,
+        kind: T,
+        source_span: Span,
+    ) -> Located<T, FileName> {
         Located {
             kind,
             location: SourceLocation {
@@ -234,12 +241,12 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
                 | '+'
                 | '-'
                 | '*'
-                | '/' 
-                | '!' 
-                | '&' 
-                | '|' 
-                | '%' 
-                | '^' 
+                | '/'
+                | '!'
+                | '&'
+                | '|'
+                | '%'
+                | '^'
                 | '~'
         )
     }
@@ -252,7 +259,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
     /// This may error in many ways!! See `LexError`, generally
     /// if things are unterminated or if there's an invalid literal
     /// or with some garbage on the end of the number
-    pub fn next_token(&mut self) -> LexResult<FileName> {
+    pub fn next_token(&mut self) -> LexResult<Token<FileName>, FileName> {
         match self.current_mode() {
             LexerMode::StrTextLiteral { start: _ } => self.lex_str_fragment_or_boundary(),
             _ => self.lex_normal_token(),
@@ -268,7 +275,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
     /// This may error in many ways!! See `LexError`, generally
     /// if things are unterminated or if there's an invalid literal
     /// or with some garbage on the end of the number
-    pub fn lex_all_tokens(mut self) -> Result<Vec<Token<FileName>>, LexError> {
+    pub fn lex_all_tokens(mut self) -> LexResult<Vec<Token<FileName>>, FileName> {
         let mut tokens = Vec::new();
 
         loop {
@@ -299,7 +306,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
     /// Depth tracking is also done through `Brace`/`Paren` modes that are more
     /// structural than an anctual mode
     #[allow(clippy::too_many_lines)]
-    fn lex_normal_token(&mut self) -> LexResult<FileName> {
+    fn lex_normal_token(&mut self) -> LexResult<Token<FileName>, FileName> {
         // Ignore whitespace
         self.skip_whitespace_comments();
         let start = self.current_pos();
@@ -359,31 +366,45 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
         // forcibly reserve them and then make them identifiers here, to prevent
         // gluing for them as programmers are used to being able to glue em to idents
         if self.try_advance_str("**") {
-            return Ok(self.make_located(TokenKind::Ident(String::from("**")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("**")), self.span_from(start))
+            );
         }
 
         if self.try_advance_str("==") {
-            return Ok(self.make_located(TokenKind::Ident(String::from("==")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("==")), self.span_from(start))
+            );
         }
 
         if self.try_advance_str("!=") {
-            return Ok(self.make_located(TokenKind::Ident(String::from("!=")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("!=")), self.span_from(start))
+            );
         }
 
         if self.try_advance_str("&&") {
-            return Ok(self.make_located(TokenKind::Ident(String::from("&&")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("&&")), self.span_from(start))
+            );
         }
 
         if self.try_advance_str("||") {
-            return Ok(self.make_located(TokenKind::Ident(String::from("||")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("||")), self.span_from(start))
+            );
         }
 
         if self.try_advance_str("<=") {
-            return Ok(self.make_located(TokenKind::Ident(String::from("<=")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("<=")), self.span_from(start))
+            );
         }
 
         if self.try_advance_str(">=") {
-            return Ok(self.make_located(TokenKind::Ident(String::from(">=")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from(">=")), self.span_from(start))
+            );
         }
 
         // Check if we are entering a StrLiteral section.
@@ -451,52 +472,72 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
         // Simple operators once again for gluing...
         if c == '+' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("+")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("+")), self.span_from(start))
+            );
         }
 
         if c == '-' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("-")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("-")), self.span_from(start))
+            );
         }
 
         if c == '*' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("*")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("*")), self.span_from(start))
+            );
         }
 
         if c == '/' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("/")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("/")), self.span_from(start))
+            );
         }
 
         if c == '!' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("!")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("!")), self.span_from(start))
+            );
         }
 
         if c == '&' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("&")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("&")), self.span_from(start))
+            );
         }
 
         if c == '|' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("|")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("|")), self.span_from(start))
+            );
         }
 
         if c == '%' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("%")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("%")), self.span_from(start))
+            );
         }
 
         if c == '^' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("^")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("^")), self.span_from(start))
+            );
         }
 
         if c == '~' {
             self.advance();
-            return Ok(self.make_located(TokenKind::Ident(String::from("~")), self.span_from(start)));
+            return Ok(
+                self.make_located(TokenKind::Ident(String::from("~")), self.span_from(start))
+            );
         }
 
         // Delimiters (need mode structural tracking/handling Interp/Slice)
@@ -522,9 +563,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
 
                 // Doesn't close anything... weird
                 _ => {
-                    return Err(LexError::UnmatchedRBrace {
-                        at: self.span_from(start),
-                    });
+                    return Err(self.make_located(LexError::UnmatchedRBrace, self.span_from(start)));
                 }
             }
         }
@@ -557,9 +596,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
 
                 // Doesn't close anything... weird
                 _ => {
-                    return Err(LexError::UnmatchedRParen {
-                        at: self.span_from(start),
-                    });
+                    return Err(self.make_located(LexError::UnmatchedRParen, self.span_from(start)));
                 }
             }
         }
@@ -567,10 +604,10 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
         // Any left over reserved character cant be an ident
         // or a reserved kwd, so its unexpected here.
         if Self::is_reserved(c) {
-            return Err(LexError::UnexpectedCharacter {
-                at: self.span_from(start),
-                character: c,
-            });
+            return Err(self.make_located(
+                LexError::UnexpectedCharacter { character: c },
+                self.span_from(start),
+            ));
         }
 
         // Since whitespace, delimiters, macros, strings, and numbers are handled,
@@ -600,7 +637,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
     ///
     /// Or an `Err(LexError)` when we cant, maybe on an
     /// unresolved Interp or something similar
-    fn lex_eof(&mut self) -> LexResult<FileName> {
+    fn lex_eof(&mut self) -> LexResult<Token<FileName>, FileName> {
         let start = self.current_pos();
 
         match self.modes.last() {
@@ -610,26 +647,26 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
 
                 // Unterminated string literal, shouldnt reach this branch
                 // but just in case.
-                LexerMode::StrTextLiteral { start } => Err(LexError::UnterminatedString {
-                    start: self.span_from(*start),
-                }),
+                LexerMode::StrTextLiteral { start } => {
+                    Err(self.make_located(LexError::UnterminatedString, self.span_from(*start)))
+                }
 
                 // Other unterminated modoes
-                LexerMode::StrInterp { start } => Err(LexError::UnterminatedInterp {
-                    start: self.span_from(*start),
-                }),
-                LexerMode::Quote { start } => Err(LexError::UnterminatedQuote {
-                    start: self.span_from(*start),
-                }),
-                LexerMode::Splice { start } => Err(LexError::UnterminatedSplice {
-                    start: self.span_from(*start),
-                }),
-                LexerMode::Brace { start } => Err(LexError::UnterminatedLBrace {
-                    start: self.span_from(*start),
-                }),
-                LexerMode::Paren { start } => Err(LexError::UnterminatedLParen {
-                    start: self.span_from(*start),
-                }),
+                LexerMode::StrInterp { start } => {
+                    Err(self.make_located(LexError::UnterminatedInterp, self.span_from(*start)))
+                }
+                LexerMode::Quote { start } => {
+                    Err(self.make_located(LexError::UnterminatedQuote, self.span_from(*start)))
+                }
+                LexerMode::Splice { start } => {
+                    Err(self.make_located(LexError::UnterminatedSplice, self.span_from(*start)))
+                }
+                LexerMode::Brace { start } => {
+                    Err(self.make_located(LexError::UnterminatedLBrace, self.span_from(*start)))
+                }
+                LexerMode::Paren { start } => {
+                    Err(self.make_located(LexError::UnterminatedLParen, self.span_from(*start)))
+                }
             },
             None => panic!("This should be impossible! Somewhere popped more modes than pushed"),
         }
@@ -705,7 +742,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
     ///
     /// After a boundary token, the mode is changed from `StrLit` to either
     /// `StrInterp` or back out of `StrLit` from popping the `StrLit` mode.
-    fn lex_str_fragment_or_boundary(&mut self) -> LexResult<FileName> {
+    fn lex_str_fragment_or_boundary(&mut self) -> LexResult<Token<FileName>, FileName> {
         // Start of this string fragment/boundary
         let start = self.current_pos();
 
@@ -726,9 +763,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
 
         // hit EOF before string terminated
         if self.peek_char().is_none() {
-            return Err(LexError::UnterminatedString {
-                start: self.span_from(start),
-            });
+            return Err(self.make_located(LexError::UnterminatedString, self.span_from(start)));
         }
 
         // Greedly eat this as a `StrFragment`
@@ -737,9 +772,9 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
         loop {
             match self.peek_char() {
                 None => {
-                    return Err(LexError::UnterminatedString {
-                        start: self.span_from(start),
-                    });
+                    return Err(
+                        self.make_located(LexError::UnterminatedString, self.span_from(start))
+                    );
                 }
 
                 // Boundary, let next call handle
@@ -761,14 +796,14 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
                         Some('$') => text.push('$'),
                         Some('0') => text.push('\0'),
                         Some(_) => {
-                            return Err(LexError::InvalidEscape {
-                                at: self.span_from(esc_start),
-                            });
+                            return Err(self
+                                .make_located(LexError::InvalidEscape, self.span_from(esc_start)));
                         }
                         None => {
-                            return Err(LexError::UnterminatedString {
-                                start: self.span_from(start),
-                            });
+                            return Err(self.make_located(
+                                LexError::UnterminatedString,
+                                self.span_from(start),
+                            ));
                         }
                     }
                 }
@@ -790,7 +825,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
     /// or `.` followed by an ASCII digit.
     ///
     /// See `Fermion3` specification for actual language spec
-    fn lex_number(&mut self) -> LexResult<FileName> {
+    fn lex_number(&mut self) -> LexResult<Token<FileName>, FileName> {
         // Start of this number
         let start = self.current_pos();
 
@@ -872,10 +907,12 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
             if is_float {
                 let bad_start = self.current_pos();
                 self.advance();
-                return Err(LexError::MalformedNumber {
-                    at: self.span_from(bad_start),
-                    reason: String::from("float literals cannot have a `u` suffix"),
-                });
+                return Err(self.make_located(
+                    LexError::MalformedNumber {
+                        reason: String::from("float literals cannot have a `u` suffix"),
+                    },
+                    self.span_from(bad_start),
+                ));
             }
             self.advance();
         }
@@ -927,7 +964,11 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
     /// the actual `Int`/`UInt` starts.
     ///
     /// `base` is the base of the integer.
-    fn lex_base_int(&mut self, prefix_len: usize, base: u32) -> LexResult<FileName> {
+    fn lex_base_int(
+        &mut self,
+        prefix_len: usize,
+        base: u32,
+    ) -> LexResult<Token<FileName>, FileName> {
         // Grab the current start position for errors that start from here
         let start = self.current_pos();
 
@@ -956,10 +997,14 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
 
         // No digits since current = start for digits, which is illegal!
         if self.current_pos() == digits_start {
-            return Err(LexError::MalformedNumber {
-                at: self.span_from(start),
-                reason: String::from("expected digits after base prefix such as: `0x`, `0b`, `0o`"),
-            });
+            return Err(self.make_located(
+                LexError::MalformedNumber {
+                    reason: String::from(
+                        "expected digits after base prefix such as: `0x`, `0b`, `0o`",
+                    ),
+                },
+                self.span_from(start),
+            ));
         }
 
         // Consume `UInt` suffix if it has one
@@ -994,7 +1039,7 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
         &mut self,
         start: usize,
         reason: &'static str,
-    ) -> Result<(), LexError> {
+    ) -> LexResult<(), FileName> {
         if self
             .peek_char()
             .is_some_and(|c| !c.is_whitespace() && !Self::is_reserved(c))
@@ -1007,10 +1052,9 @@ impl<'src, FileName: Display + Clone + PartialEq + Debug> Lexer<'src, FileName> 
                 self.advance();
             }
 
-            return Err(LexError::MalformedNumber {
-                at: self.span_from(start),
+            return Err(self.make_located(LexError::MalformedNumber {
                 reason: String::from(reason),
-            });
+            }, self.span_from(start)));
         }
 
         Ok(())

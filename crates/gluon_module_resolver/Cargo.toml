@@ -13,6 +13,7 @@ license = "AGPLv3"
 keywords = ["languages", "scripting", "script"]
 
 [dependencies]
+hashbrown = { workspace = true }
 gluon_debug = { workspace = true }
 gluon_lexer = { workspace = true }
 gluon_parser = { workspace = true }
