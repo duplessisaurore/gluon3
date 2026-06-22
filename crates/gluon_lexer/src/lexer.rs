@@ -532,6 +532,13 @@ impl<'src, FileName: Display + Clone + PartialEq> Lexer<'src, FileName> {
         // same for parenthesis....
         if c == '(' {
             self.advance();
+
+            // check for LitUnit `()`
+            if self.peek_char() == Some(')') {
+                self.advance(); // consume ')'
+                return Ok(self.make_located(TokenKind::LitUnit, self.span_from(start)));
+            }
+
             self.push_mode(LexerMode::Paren { start });
             return Ok(self.make_located(TokenKind::DelLParen, self.span_from(start)));
         }

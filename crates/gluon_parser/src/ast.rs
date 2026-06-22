@@ -320,9 +320,9 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// will then be caught by the `catch` block with
     /// the raised error.
     TryCatch {
-        try_block: Box<AstNode<FileName>>,
-        error_binding: Option<PatternNode<FileName>>, 
-        catch_block: Box<AstNode<FileName>>,
+        try_body: Box<AstNode<FileName>>,
+        error_binding: PatternNode<FileName>, 
+        catch_body: Box<AstNode<FileName>>,
     },
 
     /// Defers the execution of some expression

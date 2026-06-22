@@ -722,6 +722,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         loop {
             // `Where` guard section
             if self.match_token(TokenKind::KwWhere).is_some() {
+                // Empty where is nothing, no point building node off of it
+                if self.match_token(TokenKind::LitUnit).is_some() {
+                    continue;
+                }
+
                 // The closure is wrapped in a set of parens `()`
                 self.expect(TokenKind::DelLParen)?;
                 let guard = Box::new(self.parse_expression()?);
@@ -739,6 +744,11 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
             // Guard `fail` section
             } else if self.match_token(TokenKind::KwFail).is_some() {
+                // Empty fail is nothing
+                if self.match_token(TokenKind::LitUnit).is_some() {
+                    continue;
+                }
+
                 // Also wrapped in `()`
                 self.expect(TokenKind::DelLParen)?;
                 let fail_message = Box::new(self.parse_expression()?);
@@ -961,33 +971,36 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         };
 
         // Value Parameters `(Pattern: Type, ...)`
-        self.expect(TokenKind::DelLParen)?;
-
         // Empty by default (no params)
         let mut params = Vec::new();
 
-        // Match until the end `)`
-        while !self.check(&TokenKind::DelRParen) {
-            // The param name is bound, so a pattern here to permit for destructuring and things.
-            let param_pat = self.parse_pattern()?;
+        // If its not some empty arguments `()` we expect the full args
+        if self.match_token(TokenKind::LitUnit).is_none() {
+            self.expect(TokenKind::DelLParen)?;
 
-            // Check for annotation
-            let annotation: Option<Box<Located<ExprKind<FileName>, FileName>>> = if self.match_token(TokenKind::Colon).is_some() {
-                Some(Box::new(self.parse_type_expression()?))
-            } else {
-                None
-            };
-            params.push(crate::ast::ValueParam {
-                name: param_pat,
-                annotation,
-            });
+            // Match until the end `)`
+            while !self.check(&TokenKind::DelRParen) {
+                // The param name is bound, so a pattern here to permit for destructuring and things.
+                let param_pat = self.parse_pattern()?;
 
-            // Params are delimited by `,` commas.
-            if self.match_token(TokenKind::Comma).is_none() {
-                break;
+                // Check for annotation
+                let annotation: Option<Box<Located<ExprKind<FileName>, FileName>>> = if self.match_token(TokenKind::Colon).is_some() {
+                    Some(Box::new(self.parse_type_expression()?))
+                } else {
+                    None
+                };
+                params.push(crate::ast::ValueParam {
+                    name: param_pat,
+                    annotation,
+                });
+
+                // Params are delimited by `,` commas.
+                if self.match_token(TokenKind::Comma).is_none() {
+                    break;
+                }
             }
+            self.expect(TokenKind::DelRParen)?;
         }
-        self.expect(TokenKind::DelRParen)?;
 
         // Return Type `-> Type` before the block.
         let return_type = match kind {
@@ -1342,9 +1355,20 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             }
 
             // Try match the same infix operator (or the first)
+            let before_op = self.mark();
             let Some(op) = self.parse_infix_operator()? else {
                 break;
             };
+
+            // Operators followed by an `=` are compound assignment so rewind and escape
+            // and let assignment handle it if we have an `=`
+            // 
+            // != and stuff are specially lexed things, i mean it could be compound not
+            // equals assignment, but that doesnt make sense considering history
+            if self.match_token(TokenKind::Equal).is_some() {
+                self.reset(before_op);
+                break;
+            }
 
             let op_identity = Self::infix_operator_key(&op);
 
@@ -1525,11 +1549,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     }
                 }
 
-                // Function Calls
-                Some(TokenKind::DelLParen) => {
-                    // Consume `(``
-                    self.advance()?;
-
+                // Function Calls `(args..)` or `()`
+                Some(TokenKind::DelLParen) | Some(TokenKind::LitUnit) => {
                     // Parse the function arguments
                     let arguments = self.parse_fn_arguments()?;
 
@@ -1698,7 +1719,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             TokenKind::LitUnit => {
                 if self.match_token(TokenKind::ThinArrow).is_some() {
                     // `() -> <return>` is a zero parameter function type rather than being a Unit lit
-                    let return_type = Box::new(self.parse_expression()?);
+                    let return_type = Box::new(self.parse_type_expression()?);
                     ExprKind::FunctionType {
                         params: Vec::new(),
                         return_type,
@@ -1891,7 +1912,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 // Check if it is a function type
                 if self.match_token(TokenKind::ThinArrow).is_some() {
                     // `(<params>) -> <return>`
-                    let return_type = Box::new(self.parse_expression()?);
+                    let return_type = Box::new(self.parse_type_expression()?);
                     ExprKind::FunctionType {
                         params: items,
                         return_type,
@@ -1952,6 +1973,23 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             TokenKind::KwDefer => ExprKind::Defer(Box::new(self.parse_expression()?)),
             TokenKind::KwContinue => ExprKind::Continue,
 
+            // `Try`/`Catch`
+            TokenKind::KwTry => {
+                // try <body> catch <pattern> do <handler>
+                let try_body = Box::new(self.parse_expression()?);
+                self.expect(TokenKind::KwCatch)?;
+                let error_binding = self.parse_pattern()?;
+                self.expect(TokenKind::KwThen)?;
+                let catch_body = Box::new(self.parse_expression()?);
+
+                ExprKind::TryCatch {
+                    try_body,
+                    error_binding,
+                    catch_body,
+                }
+            }
+
+
             // Macros
             TokenKind::MacroHash => ExprKind::UnhygienicIdentifier(self.expect_ident_into_inner()?),
 
@@ -1965,8 +2003,6 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // Similar to function call but without type things.
             TokenKind::MacroAt => {
                 let callee = Box::new(self.parse_postfix()?);
-                self.expect(TokenKind::DelLParen)?;
-
                 // Grab all arguments
                 let arguments = self.parse_fn_arguments()?;
                 ExprKind::MacroInvoke {
@@ -1992,8 +2028,16 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// This is of the form of some
     /// `(arg, arg, arg)`
     ///
-    /// The `(` is expected to have been consumed by here.
+    /// The `(` is expected to NOT have been consumed by here.
     fn parse_fn_arguments(&mut self) -> ParseResult<Vec<AstNode<FileName>>, FileName> {
+        // Is this an empty set of arguments `()`
+        if self.match_token(TokenKind::LitUnit).is_some() {
+            return Ok(Vec::new());
+        }
+        
+        // Consume the `(`
+        self.expect(TokenKind::DelLParen)?;
+
         // All the arguments are expressions
         let mut arguments = Vec::new();
 
