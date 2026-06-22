@@ -76,17 +76,17 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     }
 
     /// Look at the current token without consuming it.
-    pub fn peek_token(&self) -> Option<&Token<FileName>> {
+    fn peek_token(&self) -> Option<&Token<FileName>> {
         self.tokens.get(self.cursor)
     }
 
     /// Look ahead at the `offset` token in the token stream without consuming it.
-    pub fn peek_token_nth(&self, offset: usize) -> Option<&Token<FileName>> {
+    fn peek_token_nth(&self, offset: usize) -> Option<&Token<FileName>> {
         self.tokens.get(self.cursor + offset)
     }
 
     /// Check if we have reached the end of the token stream.
-    pub fn is_at_end(&self) -> bool {
+    fn is_at_end(&self) -> bool {
         self.peek_token()
             .map(|token| matches!(token.kind, TokenKind::Eof))
             // If for some reason we don't have an EoF marker (lexer kaboomy?) then we have
@@ -96,7 +96,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
     /// Consume the current token and advance the cursor.
     /// Returns an UnexpectedEof error if we try to advance past the end.
-    pub fn advance(&mut self) -> ParseResult<Token<FileName>, FileName> {
+    fn advance(&mut self) -> ParseResult<Token<FileName>, FileName> {
         if self.is_at_end() || self.cursor >= self.tokens.len() {
             return Err(self.unexpected_eof());
         }
@@ -109,7 +109,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// Consume the current token as an `Ident` token kind and return the string
     /// inside the `Ident` back out, this returns the actual identifier or otherwise
     /// errors with an `UnexpectedToken` if it's not an identifier.
-    pub fn expect_ident_into_inner(&mut self) -> ParseResult<String, FileName> {
+    fn expect_ident_into_inner(&mut self) -> ParseResult<String, FileName> {
         let token = self.advance()?;
         if let TokenKind::Ident(text) = token.kind {
             Ok(text)
@@ -131,7 +131,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// errors with an `UnexpectedToken` if it's not a simple string.
     ///
     /// The `string_for` should describe what the string is for on the error case
-    pub fn expect_simple_string_literal(
+    fn expect_simple_string_literal(
         &mut self,
         string_for: impl Into<String>,
     ) -> ParseResult<String, FileName> {
@@ -161,7 +161,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     }
 
     /// Check if the current token matches a specific kind without consuming it.
-    pub fn check(&self, kind: &TokenKind) -> bool {
+    fn check(&self, kind: &TokenKind) -> bool {
         if self.is_at_end() {
             return false;
         }
@@ -173,7 +173,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
     /// Consume the current token if it matches `expected_kind`
     /// Otherwise, throw a `ParseError`
-    pub fn expect(&mut self, expected_kind: TokenKind) -> ParseResult<Token<FileName>, FileName> {
+    fn expect(&mut self, expected_kind: TokenKind) -> ParseResult<Token<FileName>, FileName> {
         // Matches token.. consume and advance
         if self.check(&expected_kind) {
             self.advance()
@@ -200,7 +200,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// Conditionally advance if the current token matches `kind`.
     ///
     /// Returns Some(token) if it was consumed, None otherwise.
-    pub fn match_token(&mut self, kind: TokenKind) -> Option<Token<FileName>> {
+    fn match_token(&mut self, kind: TokenKind) -> Option<Token<FileName>> {
         if self.check(&kind) {
             Some(
                 self.advance()
@@ -212,7 +212,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     }
 
     /// Gets the span of the token we just consumed.
-    pub fn previous_span(&self) -> Span {
+    fn previous_span(&self) -> Span {
         // At the start.. no token possible
         if self.cursor == 0 {
             Span { start: 0, end: 0 }
@@ -222,7 +222,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     }
 
     /// Gets the span of the current token we are looking at.
-    pub fn current_span(&self) -> Span {
+    fn current_span(&self) -> Span {
         self.peek_token()
             .map(|t| t.location.span)
             .unwrap_or_else(|| self.previous_span())
@@ -304,7 +304,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// we can then advance to the next statement.
     ///
     /// This is the `Terminators` section of the `Fermion3` spec.
-    pub fn at_statement_boundary(&self) -> bool {
+    fn at_statement_boundary(&self) -> bool {
         // EoF is always the end
         let Some(token) = self.peek_token() else {
             return true;
@@ -460,7 +460,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     /// Patterns are kind of a DSL for destructuring and `match` statements (i
     /// feel like i wrote this somehwhere else already but i forgor :skull:).
-    pub fn parse_pattern(&mut self) -> ParseResult<PatternNode<FileName>, FileName> {
+    fn parse_pattern(&mut self) -> ParseResult<PatternNode<FileName>, FileName> {
         // Start of the pattern for the final `PatternNode` span.
         let start_span = self.current_span();
         let token = self.advance()?;
@@ -825,7 +825,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     /// This takes the form of `<type: constraints/types, etc..>`
     /// where we expect that the left angle delim has been eated.
-    pub fn parse_type_parameters(&mut self) -> ParseResult<TypeParams<FileName>, FileName> {
+    fn parse_type_parameters(&mut self) -> ParseResult<TypeParams<FileName>, FileName> {
         // we are now in parametric types parsing, dont interpret `<` or `>`
         // as a possible binary operator.
         self.speculative_angle_depth += 1;
@@ -1205,7 +1205,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     ///
     /// This calls the lowest precedence expression kind parser.
     /// (assignment in our case :))
-    pub fn parse_expression(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+    fn parse_expression(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         self.parse_assignment()
     }
 
@@ -1216,7 +1216,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// `parse_assignment` causes the annotation to swallow the rest of the statement 
     /// e.g. `let x: UInt = 0x10000000u` getting parsed as an assignment instead of 
     /// stopping after `UInt`.
-    pub fn parse_type_expression(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+    fn parse_type_expression(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         self.parse_pipeline()
     }
 

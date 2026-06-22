@@ -3,20 +3,21 @@
 use core::fmt::Display;
 
 use alloc::string::String;
-use gluon_debug::{Located};
+use gluon_debug::{Located, SourceFile, SourceLocation};
 use gluon_lexer::LexError;
-use gluon_parser::errors::ParseError;
+use gluon_parser::{ast::AstNode, errors::ParseError};
 
 /// Result of one step of the module resolving process
-pub type ModuleResolveResult<T, FileName> = Result<T, ModuleResolveError<FileName>>;
+pub type ModuleResolveResult<T, FileName, PathResolveError> = Result<T, ModuleResolveError<FileName, PathResolveError>>;
 
 /// Errors that can occur while module resolving.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ModuleResolveError<FileName: Display + Clone + PartialEq> {
+pub enum ModuleResolveError<FileName: Display + Clone + PartialEq, PathResolveError> {
     /// This module could not be found
     /// on the system using the provided loader
     ModuleNotFound {
-        path: Located<String, FileName>
+        path: SourceFile<FileName>,
+        wanted_by: SourceLocation<FileName>
     },
 
     /// A cyclic dependency was detected in the import graph
@@ -37,5 +38,16 @@ pub enum ModuleResolveError<FileName: Display + Clone + PartialEq> {
     /// The sourced dependency module failed parsing
     ParserError {
         error: Located<ParseError, FileName>
+    },
+
+    /// There was an unexpected non-import expression in the 
+    /// imports section of a `Module`
+    UnexpectedNonImport {
+        found: AstNode<FileName>
+    },
+
+    /// Some error to do with module resolving of a path
+    ModulePathResolveError {
+        error: PathResolveError
     }
 }

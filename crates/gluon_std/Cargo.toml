@@ -13,9 +13,14 @@ license = "AGPLv3"
 keywords = ["languages", "scripting", "script"]
 
 [dependencies]
+# For path expansion and things..
+path-absolutize = { version = "3.1.1", features = ["once_cell_cache"] }
+tilde-expand = "0.1.1"
+
 gluon_lexer = { workspace = true }
 gluon_debug = { workspace = true }
 gluon_parser = { workspace = true }
+gluon_module_resolver = { workspace = true }
 
 # Argument parsing helper
 clap = { version = "4.5", features = ["derive", "wrap_help"] }

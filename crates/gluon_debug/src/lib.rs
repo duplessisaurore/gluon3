@@ -24,7 +24,7 @@ use alloc::{
 extern crate alloc;
 
 /// A source file which points to some file on disk
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceFile<FileName: Display + Clone> {
     pub filename: FileName,
 }
