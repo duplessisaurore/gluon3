@@ -1910,6 +1910,13 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 }
             }
 
+            TokenKind::KwLoop => {
+                // loop <body>
+                let body = Box::new(self.parse_expression()?);
+                ExprKind::Loop { body }
+            }
+
+
             // Blocks `{ ... }`
             TokenKind::DelLBrace => {
                 let stmts = self.parse_block_contents(&TokenKind::DelRBrace)?;
