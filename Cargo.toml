@@ -13,3 +13,4 @@ lepton3 = { git = "https://github.com/duplessisaurore/lepton3" }
 gluon_debug = { path = "./crates/gluon_debug" }
 gluon_lexer = { path = "./crates/gluon_lexer" }
 gluon_parser = { path = "./crates/gluon_parser" }
+gluon_module_resolver = { path = "./crates/gluon_module_resolver" }

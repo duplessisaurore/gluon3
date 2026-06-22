@@ -20,7 +20,7 @@ extern crate alloc;
 pub mod ast;
 
 /// The actual `Parser` itself, this takes
-/// all the lexed `Tokens` as output and produces
+/// all the lexed `Tokens` as input and produces
 /// one `Module` representing that file.
 pub mod parser;
 pub use parser::Parser;

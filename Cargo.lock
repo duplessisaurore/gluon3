@@ -127,6 +127,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gluon_module_resolver"
+version = "1.0.0"
+dependencies = [
+ "gluon_debug",
+ "gluon_lexer",
+ "gluon_parser",
+]
+
+[[package]]
 name = "gluon_parser"
 version = "1.0.0"
 dependencies = [
