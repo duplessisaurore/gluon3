@@ -486,19 +486,19 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
         body: Box<AstNode<FileName>>,
     },
 
-    /// Invoke a macro
+    /// Invoke a macro by its name
     /// 
     /// This is special and different to `Call`
     /// as it is entirely at compile time.
     MacroInvoke {
-        macro_target: Box<AstNode<FileName>>, 
+        macro_target: Located<String, FileName>, 
         arguments: Vec<AstNode<FileName>>,
     },
 
     /// Macro quote, which inserts the elements
     /// back into the code after running macros as
     /// actual AST elements for compilation.
-    MacroQuote(Box<AstNode<FileName>>),
+    MacroQuote(Vec<AstNode<FileName>>),
 
     /// Splicing variables into the macro, similar
     /// to that of string interpolation but macros.

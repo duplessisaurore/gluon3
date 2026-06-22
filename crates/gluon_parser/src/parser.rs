@@ -2019,13 +2019,24 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
             // Similar to function call but without type things.
             TokenKind::MacroAt => {
-                let callee = Box::new(self.parse_postfix()?);
-                // Grab all arguments
+                // Macro target is just an Ident, no fancy expressions
+                let macro_ident = self.expect_ident_into_inner()?;
+                let macro_target = self.make_located(macro_ident, self.previous_span());
+                
+                // Parse args like functions
                 let arguments = self.parse_fn_arguments()?;
+
                 ExprKind::MacroInvoke {
-                    macro_target: callee,
+                    macro_target,
                     arguments,
                 }
+            },
+
+            // Macro quote bodies, essentially a block with "`` .. ``" instead of `{ .. }`
+            TokenKind::MacroQuoteStart => {
+                let stmts = self.parse_block_contents(&TokenKind::MacroQuoteEnd)?;
+                self.expect(TokenKind::MacroQuoteEnd)?;
+                ExprKind::MacroQuote(stmts)
             },
 
             // Statements are also valid expressions since everything is an expression blehhh
