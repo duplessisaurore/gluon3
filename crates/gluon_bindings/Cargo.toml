@@ -1,0 +1,19 @@
+[package]
+name = "gluon_name_resolver"
+version = "1.0.0"
+edition = "2024"
+authors = ["The Gluon3 Contributors"]
+
+description = "The Gluon3 compilers's name resolver which takes all Modules and attempts to resolve all bindings for each module"
+readme = "README.md"
+
+repository = "https://github.com/duplessisaurore/gluon3"
+license = "AGPLv3"
+
+keywords = ["languages", "scripting", "script"]
+
+[dependencies]
+hashbrown = { workspace = true }
+gluon_debug = { workspace = true }
+gluon_lexer = { workspace = true }
+gluon_parser = { workspace = true }

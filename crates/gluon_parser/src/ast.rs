@@ -5,7 +5,7 @@ use core::fmt::Display;
 use alloc::{boxed::Box, rc::Rc};
 use alloc::string::String;
 use alloc::vec::Vec;
-use gluon_debug::{Located, SourceFile};
+use gluon_debug::{Located, SourceFile, Span};
 
 /// The root node of a single `Fermion3` source file's parsed output
 /// 
@@ -41,15 +41,24 @@ pub struct Module<FileName: Display + Clone + PartialEq> {
     pub statements: Vec<AstNode<FileName>>,
 }
 
+/// A parser located element
+/// 
+/// The parser adds a unique NodeID to all located elements
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParserLocated<T: Clone + PartialEq, FileName: Display + Clone + PartialEq> {
+    pub inner: Located<T, FileName>,
+    pub node_id: u64
+}
+
 /// A located ExprKind
 /// 
 /// This essentially just tracks the source location
 /// of some component of the AST
-pub type AstNode<FileName> = Located<ExprKind<FileName>, FileName>;
+pub type AstNode<FileName> = ParserLocated<ExprKind<FileName>, FileName>;
 
 /// Patterns are a sort of mini-DSL inside of `Fermion3` for matching,
 /// binding and destructuring but they also need location info!
-pub type PatternNode<FileName> = Located<Pattern<FileName>, FileName>;
+pub type PatternNode<FileName> = ParserLocated<Pattern<FileName>, FileName>;
 
 /// Type parameters used where parametric types are
 pub type TypeParams<FileName> = Vec<TypeParam<FileName>>;
@@ -491,7 +500,7 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
     /// This is special and different to `Call`
     /// as it is entirely at compile time.
     MacroInvoke {
-        macro_target: Located<String, FileName>, 
+        macro_target: ParserLocated<String, FileName>, 
         arguments: Vec<AstNode<FileName>>,
     },
 
@@ -649,3 +658,20 @@ pub type ObjectFieldDef<FileName> = Field<Box<AstNode<FileName>>>;
 /// An object field with the rvalue as the actual
 /// value here of the field rather than the definition
 pub type ObjectElementField<FileName> = Field<Box<AstNode<FileName>>>;
+
+impl<T: Clone + PartialEq, FileName: Display + Clone + PartialEq> ParserLocated<T, FileName> {
+    /// Returns the inner located kind's span.
+    pub fn get_span(&self) -> Span {
+        self.inner.location.span
+    }
+
+    /// Returns the inner located kind.
+    pub fn get_kind(self) -> T {
+        self.inner.kind
+    }
+
+    /// Returns the inner located kind as a ref.
+    pub fn get_kind_ref(&self) -> &T {
+        &self.inner.kind
+    }
+}

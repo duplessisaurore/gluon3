@@ -101,7 +101,7 @@ impl<FileName: Display + Clone + PartialEq + Hash + Eq + Debug, Loader: LoadModu
         // Walk each import in the module..
         for import in &current_module.imports {
             // Grab the import path, we enforce parser correctness here because why not
-            let import_path = match &import.kind {
+            let import_path = match &import.get_kind_ref() {
                 ExprKind::Import { path, alias: _ } => path,
                 _ => {
                     return Err(ModuleResolveError::UnexpectedNonImport {
@@ -141,7 +141,7 @@ impl<FileName: Display + Clone + PartialEq + Hash + Eq + Debug, Loader: LoadModu
             let source = loader.load_module_from_path(&path).ok_or_else(|| {
                 ModuleResolveError::ModuleNotFound {
                     path: Rc::as_ref(&path).clone(),
-                    wanted_by: import.location.clone(),
+                    wanted_by: import.inner.location.clone(),
                 }
             })?;
 

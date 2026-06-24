@@ -12,9 +12,8 @@ use gluon_lexer::{Token, TokenKind::{self}};
 
 use crate::{
     ast::{
-        AstNode, EnumVariantDef, ExprKind, Field, Literal, Module, ObjectElement, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
-    },
-    errors::{LocatedParseError, ParseError, ParseResult},
+        AstNode, EnumVariantDef, ExprKind, Field, Literal, Module, ObjectElement, ParserLocated, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
+    }, errors::{LocatedParseError, ParseError, ParseResult},
 };
 
 /// A mark which allows for storing the current position
@@ -58,6 +57,10 @@ pub struct Parser<FileName: Display + Clone + PartialEq> {
     /// parametric types, as types inherently have no notion of
     /// less/greater.
     speculative_angle_depth: usize,
+
+    /// The last allocated node ID, we increasingly increment this
+    /// monotonically to continue having unique NodeID's.
+    node_id: u64,
 }
 
 impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
@@ -71,7 +74,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             tokens,
             cursor: 0,
             file,
-            speculative_angle_depth: 0
+            speculative_angle_depth: 0,
+            node_id: 0,
         }
     }
 
@@ -241,6 +245,28 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 file: Rc::clone(&self.file),
                 span: source_span,
             },
+        }
+    }
+
+    /// Returns a new ParserLocated<T> for the kind with a source span in the current
+    /// stored file of the `Lexer`.
+    /// 
+    /// This allocates a new NodeID for this element
+    fn make_parser_located<T: Clone + PartialEq>(
+        &mut self,
+        kind: T,
+        source_span: Span,
+    ) -> ParserLocated<T, FileName> {
+        self.node_id += 1;
+        ParserLocated {
+            inner: Located {
+                kind,
+                location: SourceLocation {
+                    file: Rc::clone(&self.file),
+                    span: source_span,
+                },
+            },
+            node_id: self.node_id
         }
     }
 
@@ -453,7 +479,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // Total span of the entire `import` statement
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(ExprKind::Import { path, alias }, span))
+        Ok(self.make_parser_located(ExprKind::Import { path, alias }, span))
     }
 
     /// Expects the next chunk of tokens to be some pattern to parse
@@ -478,7 +504,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     let fields = self.parse_object_pattern_field_list()?;
                     Pattern::Object {
                         target_type: Some(Box::new(
-                            self.make_located(ExprKind::Identifier(text), start_span),
+                            self.make_parser_located(ExprKind::Identifier(text), start_span),
                         )),
                         fields,
                     }
@@ -504,7 +530,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
                     Pattern::EnumVariant {
                         enum_type: Box::new(
-                            self.make_located(ExprKind::Identifier(text), start_span),
+                            self.make_parser_located(ExprKind::Identifier(text), start_span),
                         ),
                         variant_name,
                         fields,
@@ -545,7 +571,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // Combine the pattern back in with the full span of the pattern
         // which is the start until the last pattern token we eated.
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(kind, span))
+        Ok(self.make_parser_located(kind, span))
     }
 
     /// Expects the next chunk of tokens to be the object fields section of the
@@ -664,7 +690,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         self.expect(TokenKind::MacroQuoteEnd)?;
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(ExprKind::Block(stmts), span))
+        Ok(self.make_parser_located(ExprKind::Block(stmts), span))
     }
 
     /// Parses a type definition
@@ -720,7 +746,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
                 // Update the node to include this with the guard.
                 let span = start_span.join(self.previous_span());
-                node = self.make_located(
+                node = self.make_parser_located(
                     ExprKind::TypeGuard {
                         base: Box::new(node),
                         guard,
@@ -741,7 +767,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 self.expect(TokenKind::DelRParen)?;
 
                 let span = start_span.join(self.previous_span());
-                node = self.make_located(
+                node = self.make_parser_located(
                     ExprKind::TypeFail {
                         base: Box::new(node),
                         fail_message,
@@ -773,7 +799,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 self.expect(TokenKind::DelRBrace)?;
 
                 let span = start_span.join(self.previous_span());
-                node = self.make_located(
+                node = self.make_parser_located(
                     ExprKind::TypeWith {
                         base: Box::new(node),
                         methods,
@@ -787,7 +813,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // Make the full type definition from the joined nodes.
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(
+        Ok(self.make_parser_located(
             ExprKind::TypeDef {
                 publicity,
                 name,
@@ -806,7 +832,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         self.expect(TokenKind::DelLBrace)?;
         let fields = self.parse_type_object_field_list()?;
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(ExprKind::ObjectTypeDef { fields }, span))
+        Ok(self.make_parser_located(ExprKind::ObjectTypeDef { fields }, span))
     }
 
     /// Parses an `enum { Variant, Variant { field: Type, ... }, ... }` type definition
@@ -817,7 +843,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         self.expect(TokenKind::DelLBrace)?;
         let variants = self.parse_enum_variant_list()?;
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(ExprKind::EnumTypeDef { variants }, span))
+        Ok(self.make_parser_located(ExprKind::EnumTypeDef { variants }, span))
     }
 
     /// Tries to parse type parameters in the definition
@@ -992,7 +1018,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 let param_pat = self.parse_pattern()?;
 
                 // Check for annotation
-                let annotation: Option<Box<Located<ExprKind<FileName>, FileName>>> = if self.match_token(TokenKind::Colon).is_some() {
+                let annotation: Option<Box<ParserLocated<ExprKind<FileName>, FileName>>> = if self.match_token(TokenKind::Colon).is_some() {
                     Some(Box::new(self.parse_type_expression()?))
                 } else {
                     None
@@ -1043,7 +1069,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         let span = start_span.join(self.previous_span());
 
         // Depending on the kind of function we have differing defs
-        Ok(self.make_located(
+        Ok(self.make_parser_located(
             match kind {
                 FunctionKind::Function => ExprKind::FunctionDef {
                     publicity,
@@ -1100,7 +1126,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         let initializer = Box::new(self.parse_expression()?);
 
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(
+        Ok(self.make_parser_located(
             ExprKind::LetBinding {
                 publicity,
                 is_mutable,
@@ -1131,7 +1157,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
             // Re-span to cover the parens themselves, not just the inner expr.
             let span = start_span.join(self.previous_span());
-            return Ok(Some(self.make_located(expr.kind, span)));
+            return Ok(Some(self.make_parser_located(expr.inner.kind, span)));
         }
 
         // `<` / `>` are lexed as DelLAngle/DelRAngle (shared with generics),
@@ -1141,13 +1167,13 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // They should only be considered when we are not already trying to parse some expression
         // as parametric types, in which case the `speculative_angle_depth` > 0
         if self.speculative_angle_depth == 0 && self.match_token(TokenKind::DelLAngle).is_some() {
-            return Ok(Some(self.make_located(
+            return Ok(Some(self.make_parser_located(
                 ExprKind::Identifier(String::from("<")),
                 start_span,
             )));
         }
         if self.speculative_angle_depth == 0 && self.match_token(TokenKind::DelRAngle).is_some() {
-            return Ok(Some(self.make_located(
+            return Ok(Some(self.make_parser_located(
                 ExprKind::Identifier(String::from(">")),
                 start_span,
             )));
@@ -1161,7 +1187,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // Grab the first ident which we assume to just be a simple ident first
         let text = self.expect_ident_into_inner()?;
-        let mut node = self.make_located(ExprKind::Identifier(text), start_span);
+        let mut node = self.make_parser_located(ExprKind::Identifier(text), start_span);
 
         // We keep checking each access following
         // the individual to make sure its a field access
@@ -1174,7 +1200,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             self.advance()?;
             let field = self.expect_ident_into_inner()?;
             let span = start_span.join(self.previous_span());
-            node = self.make_located(
+            node = self.make_parser_located(
                 ExprKind::FieldAccess {
                     expr: Box::new(node),
                     field,
@@ -1243,9 +1269,9 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 let value = self.parse_assignment()?;
 
                 // Total span will be left to the right
-                let span = left.location.span.join(value.location.span);
+                let span = left.get_span().join(value.get_span());
 
-                return Ok(self.make_located(
+                return Ok(self.make_parser_located(
                     ExprKind::CompoundAssignment {
                         op: Box::new(op),
                         target: Box::new(left),
@@ -1264,8 +1290,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         if self.match_token(TokenKind::Equal).is_some() {
             // grab RHS, `=` already consumed by `match_token`
             let value = self.parse_expression()?;
-            let span = left.location.span.join(value.location.span);
-            return Ok(self.make_located(
+            let span = left.get_span().join(value.get_span());
+            return Ok(self.make_parser_located(
                 ExprKind::Assignment {
                     target: Box::new(left),
                     value: Box::new(value),
@@ -1299,8 +1325,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 let right = self.parse_function_type()?;
 
                 // make pipeline with the current expr iteratively (left associative)
-                let span = expr.location.span.join(right.location.span);
-                expr = self.make_located(
+                let span = expr.get_span().join(right.get_span());
+                expr = self.make_parser_located(
                     ExprKind::Pipeline {
                         left: Box::new(expr),
                         right: Box::new(right),
@@ -1324,7 +1350,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// This only succeeds for the field accesses and simple idents
     /// because lowkey sameness for a normal expression is too hard
     fn infix_operator_key(node: &AstNode<FileName>) -> Option<String> {
-        match &node.kind {
+        match &node.inner.kind {
             ExprKind::Identifier(text) => Some(text.clone()),
             ExprKind::FieldAccess { expr, field } => {
                 let expr_key = Self::infix_operator_key(expr)?;
@@ -1396,15 +1422,15 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                             prev_ident: prev_key.clone(),
                             cur_ident: op_identity
 
-                        }, op.location.span)
+                        }, op.get_span())
                     );
                 }
             }
 
             // parse RHS and fold
             let right = self.parse_typeops()?;
-            let span = left.location.span.join(right.location.span);
-            left = self.make_located(
+            let span = left.get_span().join(right.get_span());
+            left = self.make_parser_located(
                 ExprKind::BinaryOp {
                     op: Box::new(op),
                     left: Box::new(left),
@@ -1439,10 +1465,10 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // `as <Type>`
             if self.match_token(TokenKind::KwAs).is_some() {
                 let target_type = self.parse_unary()?;
-                let span = expr.location.span.join(target_type.location.span);
+                let span = expr.get_span().join(target_type.get_span());
 
                 // fold RHS type
-                expr = self.make_located(
+                expr = self.make_parser_located(
                     ExprKind::TypeCast {
                         expr: Box::new(expr),
                         target_type: Box::new(target_type),
@@ -1453,10 +1479,10 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // `is <Type>`
             } else if self.match_token(TokenKind::KwIs).is_some() {
                 let target_type = self.parse_unary()?;
-                let span = expr.location.span.join(target_type.location.span);
+                let span = expr.get_span().join(target_type.get_span());
 
                 // fold RHS type
-                expr = self.make_located(
+                expr = self.make_parser_located(
                     ExprKind::TypeCheck {
                         expr: Box::new(expr),
                         target_type: Box::new(target_type),
@@ -1503,9 +1529,9 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // Parse the thing we're applying it to, safe because we've already
             // eaten the unary op
             let expr = Box::new(self.parse_unary()?);
-            let span = start_span.join(expr.location.span);
+            let span = start_span.join(expr.get_span());
 
-            return Ok(self.make_located(
+            return Ok(self.make_parser_located(
                 ExprKind::UnaryOp {
                     op: Box::new(op),
                     expr,
@@ -1541,8 +1567,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 // Try see if it's a generic (LAngle, RAngle)
                 Some(TokenKind::DelLAngle) => {
                     if let Some(args) = self.try_parse_parametric_args() {
-                        let span = expr.location.span.join(self.previous_span());
-                        expr = self.make_located(
+                        let span = expr.get_span().join(self.previous_span());
+                        expr = self.make_parser_located(
                             ExprKind::Parametric {
                                 target: Box::new(expr),
                                 arguments: args,
@@ -1562,8 +1588,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     // Parse the function arguments
                     let arguments = self.parse_fn_arguments()?;
 
-                    let span = expr.location.span.join(self.previous_span());
-                    expr = self.make_located(
+                    let span = expr.get_span().join(self.previous_span());
+                    expr = self. make_parser_located(
                         ExprKind::Call {
                             callee: Box::new(expr),
                             arguments,
@@ -1596,8 +1622,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                         self.expect(TokenKind::DelRBracket)?;
 
                         // Put start and end together for the slice
-                        let span = expr.location.span.join(self.previous_span());
-                        expr = self.make_located(
+                        let span = expr.get_span().join(self.previous_span());
+                        expr = self.make_parser_located(
                             ExprKind::Slice {
                                 array: Box::new(expr),
                                 start,
@@ -1609,8 +1635,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                         // In this case the start was just a index because we dont have
                         // the slice ..
                         self.expect(TokenKind::DelRBracket)?;
-                        let span = expr.location.span.join(self.previous_span());
-                        expr = self.make_located(
+                        let span = expr.get_span().join(self.previous_span());
+                        expr = self.make_parser_located(
                             ExprKind::IndexAccess {
                                 expr: Box::new(expr),
                                 index: start.unwrap(),
@@ -1635,8 +1661,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                         // Grab all of the elements in this literal
                         let elements = self.parse_object_literal_elements()?;
 
-                        let span = expr.location.span.join(self.previous_span());
-                        expr = self.make_located(
+                        let span = expr.get_span().join(self.previous_span());
+                        expr = self.make_parser_located(
                             ExprKind::EnumVariantLiteral {
                                 enum_type: Box::new(expr),
                                 variant_name: field,
@@ -1646,8 +1672,8 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                         );
                     } else {
                         // We just have a simple field access, no enum variant because no `{}`
-                        let span = expr.location.span.join(self.previous_span());
-                        expr = self.make_located(
+                        let span = expr.get_span().join(self.previous_span());
+                        expr = self.make_parser_located(
                             ExprKind::FieldAccess {
                                 expr: Box::new(expr),
                                 field,
@@ -1754,7 +1780,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                         // A simple fragment, just add it to the parts
                         TokenKind::StrFragment(text) => {
                             let span = part_token.location.span;
-                            parts.push(self.make_located(ExprKind::Lit(Literal::Str(text)), span));
+                            parts.push(self.make_parser_located(ExprKind::Lit(Literal::Str(text)), span));
                         }
                         // The start of some interpolation region
                         TokenKind::StrInterpStart => {
@@ -1782,7 +1808,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                 } else {
                     // Collapse to Str Literal to simplify it if there isnt an interp
                     match parts.into_iter().next() {
-                        Some(node) => node.kind,
+                        Some(node) => node.get_kind(),
                         None => ExprKind::Lit(Literal::Str(alloc::string::String::new())),
                     }
                 }
@@ -1796,7 +1822,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     // Parse all its elements..
                     let elements = self.parse_object_literal_elements()?;
 
-                    let target = self.make_located(ExprKind::Identifier(text), start_span);
+                    let target = self.make_parser_located(ExprKind::Identifier(text), start_span);
                     ExprKind::ObjectLiteral {
                         target_type: Some(Box::new(target)),
                         elements,
@@ -2021,7 +2047,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             TokenKind::MacroAt => {
                 // Macro target is just an Ident, no fancy expressions
                 let macro_ident = self.expect_ident_into_inner()?;
-                let macro_target = self.make_located(macro_ident, self.previous_span());
+                let macro_target = self.make_parser_located(macro_ident, self.previous_span());
                 
                 // Parse args like functions
                 let arguments = self.parse_fn_arguments()?;
@@ -2042,17 +2068,17 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             // Statements are also valid expressions since everything is an expression blehhh
             // just use the statement helpers and extract the kinds.
             TokenKind::KwLet => {
-                self.parse_let_binding(Publicity::Private)?.kind
+                self.parse_let_binding(Publicity::Private)?.get_kind()
             }
             TokenKind::KwType => {
-                self.parse_type_def(Publicity::Private)?.kind
+                self.parse_type_def(Publicity::Private)?.get_kind()
             }
             TokenKind::KwFn => {
-                self.parse_function_like_def(Publicity::Private, FunctionKind::Function)?.kind
+                self.parse_function_like_def(Publicity::Private, FunctionKind::Function)?.get_kind()
             }
             TokenKind::KwMacro => {
                 self.expect(TokenKind::KwFn)?;
-                self.parse_function_like_def(Publicity::Private, FunctionKind::Macro)?.kind
+                self.parse_function_like_def(Publicity::Private, FunctionKind::Macro)?.get_kind()
             }
 
             found => {
@@ -2064,7 +2090,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         };
 
         let span = start_span.join(self.previous_span());
-        Ok(self.make_located(kind, span))
+        Ok(self.make_parser_located(kind, span))
     }
 
     /// Parse the value arguments to a function
@@ -2127,7 +2153,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             let mut params = Vec::new();
             params.push(left);
 
-            return Ok(self.make_located(
+            return Ok(self.make_parser_located(
                 ExprKind::FunctionType {
                     params,
                     return_type,

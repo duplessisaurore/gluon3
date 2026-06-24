@@ -155,6 +155,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gluon_name_resolver"
+version = "1.0.0"
+dependencies = [
+ "gluon_debug",
+ "gluon_lexer",
+ "gluon_parser",
+ "hashbrown",
+]
+
+[[package]]
 name = "gluon_parser"
 version = "1.0.0"
 dependencies = [
