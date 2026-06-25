@@ -15,3 +15,7 @@
 #![no_std]
 
 extern crate alloc;
+
+/// Bindings, scopes and scope trees for
+/// handling name resolution across scopes
+pub mod bindings;
