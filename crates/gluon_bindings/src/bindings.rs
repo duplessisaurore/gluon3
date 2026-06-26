@@ -12,30 +12,28 @@ use hashbrown::HashMap;
 /// All possible kinds of bindings in Fermion3
 #[derive(Debug, Clone)]
 pub enum BindingKind {
-    /// Some function's parameter at some index in the locals
-    /// for that function
-    Parameter { index: usize },
 
-    /// Some local binding in the function (e.g let..) with some index
-    /// in the function.
-    Local { is_mutable: bool, index: usize },
+    // Local-level bindings
 
-    /// An upvalue which is a captured binding from some function's scope
-    Upvalue { from: FunctionId, binding: BindingId },
-    
+    /// A parameter to some function
+    Parameter,
+
+    /// Some local binding in the function (e.g let..)
+    Local { is_mutable: bool },
+
     // Module-level bindings
 
     /// A global let which can be an exported value (e.g let grr =...)
-    GlobalLet { is_mutable: bool, publicity: Publicity },
+    Let { is_mutable: bool, publicity: Publicity },
 
     /// A function (e.g fn blah..)
     Function { id: FunctionId, publicity: Publicity },
 
     /// A type definition/alias (e.g type Bleh = Meow...)
-    TypeDef { publicity: Publicity },
+    Type { publicity: Publicity },
 
     /// A macro definition/alias (e.g macro fn blah...)
-    MacroDef { publicity: Publicity },
+    Macro { publicity: Publicity },
     
     /// An imported module object (e.g. `import "math.f3" as m`)
     Import { path: String }, 
