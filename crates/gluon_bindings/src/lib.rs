@@ -28,3 +28,7 @@ pub mod resolver;
 /// Errors that can occur during the name
 /// resolution process
 pub mod errors;
+
+/// Trait for simplifying paths down to the
+/// actual binding name for imports
+pub mod binding_trait;

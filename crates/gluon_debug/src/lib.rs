@@ -31,7 +31,7 @@ pub struct SourceFile<FileName: Display + Clone> {
 
 /// A source location in a file
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceLocation<FileName: Display+ Clone> {
+pub struct SourceLocation<FileName: Display + Clone> {
     pub file: Rc<SourceFile<FileName>>,
     pub span: Span,
 }
@@ -49,8 +49,8 @@ impl<FileName: Display + Clone> SourceLocation<FileName> {
 }
 
 /// Attach some location information onto a type
-#[derive(Debug, Clone, PartialEq)]
-pub struct Located<T: Clone + PartialEq, FileName: Display + Clone + PartialEq> {
+#[derive(Debug)]
+pub struct Located<T, FileName: Display + Clone + PartialEq> {
     pub kind: T,
     pub location: SourceLocation<FileName>,
 }
@@ -63,7 +63,7 @@ pub struct Span {
     pub end: usize,
 }
 
-impl<FileName: Display + Clone> SourceLocation<FileName > {
+impl<FileName: Display + Clone> SourceLocation<FileName> {
     #[must_use]
     pub fn new_span_in_file(&self, span: Span) -> Self {
         Self {
@@ -83,8 +83,24 @@ impl Span {
     }
 }
 
-impl<T: Clone + PartialEq, FileName: Display + Clone + PartialEq> Located<T, FileName> {
+impl<T, FileName: Display + Clone + PartialEq> Located<T, FileName> {
     pub fn span(&self) -> Span {
         self.location.span
+    }
+}
+
+impl<T, FileName: Display + Clone + PartialEq> Clone for Located<T, FileName> where
+    T: Clone
+{
+    fn clone(&self) -> Self {
+        Self { kind: self.kind.clone(), location: self.location.clone() }
+    }
+}
+
+impl<T, FileName: Display + Clone + PartialEq> PartialEq for Located<T, FileName> where
+    T: PartialEq
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.location == other.location
     }
 }

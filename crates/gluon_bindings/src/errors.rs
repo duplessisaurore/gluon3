@@ -1,36 +1,50 @@
 //! Errors that can occur during the binding resolving process
 
+use core::fmt::Display;
+
 use alloc::string::String;
 use gluon_debug::Located ;
+use gluon_parser::ast::ExprKind;
 
 /// Result of one step of the binding resolving process
-pub type BindingResolveResult<T, FileName> = Result<T, BindingResolveError<FileName>>;
+pub type BindingResolveResult<T, FileName, PathSimplificationError> = Result<T, BindingResolveError<FileName, PathSimplificationError>>;
 
 /// A located binding resolve error
-pub type BindingResolveError<FileName> = Located<BindingResolveErrorInner, FileName>;
+pub type BindingResolveError<FileName, PathSimplificationError> = Located<BindingResolveErrorKind<FileName, PathSimplificationError>, FileName>;
 
-/// An error that can occur while binding resolving
-/// the AST.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BindingResolveErrorInner {
-    kind: BindingResolveErrorKind,
-    name: String
-}
-
-/// All the inner kinds for errors that can occur while binding resolving.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BindingResolveErrorKind {
+/// All the kinds of errors that can occur while binding resolving.
+#[derive(Debug, PartialEq)]
+pub enum BindingResolveErrorKind<FileName: Display + Clone + PartialEq, PathSimplificationError> {
     /// Encountered a name at a location that was unresolved
     /// 
     /// This means a binding did not exist for it yet.
-    UnresolvedName,
+    UnresolvedName {
+        name: String,
+    },
 
     /// A duplicate top level definition of a name was found
-    DuplicateTopLevelDefinition,
+    DuplicateTopLevelDefinition {
+        name: String,
+    },
 
     /// There was an attempted assignment to an immutable binding
-    AssignmentToImmutable,
+    AssignmentToImmutable {
+        name: String,
+    },
 
     /// There was an attempted assignment to a non-local binding
-    AssignmentToNonLocal,
+    AssignmentToNonLocal {
+        name: String,
+    },
+
+    /// An unexpected AstNode occured here with some kind
+    UnexpectedExprKind {
+        kind: ExprKind<FileName>
+    },
+
+    /// An error occured when trying to simplify a path
+    PathSimplificationError {
+        path: String,
+        error: PathSimplificationError
+    }
 }
