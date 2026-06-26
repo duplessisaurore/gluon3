@@ -61,6 +61,10 @@ pub struct Parser<FileName: Display + Clone + PartialEq> {
     /// The last allocated node ID, we increasingly increment this
     /// monotonically to continue having unique NodeID's.
     node_id: u64,
+
+    /// All errors captured by the parser when parsing the current
+    /// file.
+    errors: Vec<LocatedParseError<FileName>>
 }
 
 impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
@@ -76,6 +80,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             file,
             speculative_angle_depth: 0,
             node_id: 0,
+            errors: Vec::new(),
         }
     }
 
@@ -354,7 +359,10 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// This may error in many ways!! See `ParseError`, generally
     /// if things are not in the valid sequence for the grammar as defined
     /// in the specification.
-    pub fn parse_module(&mut self) -> ParseResult<Module<FileName>, FileName> {
+    /// 
+    /// Because the parser does not exit after the first error, it returns a Vec
+    /// of the errors.
+    pub fn parse_module(mut self) -> Result<Module<FileName>, Vec<LocatedParseError<FileName>>>  {
         // Fill in this module with each top level component
         let mut module = Module {
             name: Rc::clone(&self.file),
@@ -365,72 +373,81 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             statements: Vec::new(),
         };
 
-        // Parse until the end of the file
-        //
-        // This loop is responsible for parsing all the top level module
-        // statements (TLS) which may or may not be public.
+        // Parse TLS until the end of the file.
         while !self.is_at_end() {
-            // Check if this TLS is public or not.
-            let publicity = match self.match_token(TokenKind::KwPub) {
-                Some(_) => Publicity::Public,
+            let result = self.parse_top_level_statement(&mut module);
+            self.recover(result);
+        }
 
-                // Default is private.
-                None => Publicity::Private,
-            };
-            let next_kind = self.peek_token().map(|token| token.kind.clone());
-            
-            // Check for any top level statements that can be public
-            // or just a general statement that should be evaluated
-            match next_kind {
-                Some(TokenKind::KwImport) => {
-                    // Imports cannot be made "public"/rexported.
-                    if publicity != Publicity::Private {
-                        return Err(self.make_located(
-                            ParseError::PublicModifierOnImport,
-                            self.current_span(),
-                        ));
-                    }
-
-                    module.imports.push(self.parse_import()?);
-                }
-                Some(TokenKind::KwType) => {
-                    self.advance()?;
-                    module.types.push(self.parse_type_def(publicity)?);
-                }
-                Some(TokenKind::KwFn) => {
-                    self.advance()?;
-                    module
-                        .functions
-                        .push(self.parse_function_like_def(publicity, FunctionKind::Function)?);
-                }
-                Some(TokenKind::KwMacro) => {
-                    self.advance()?;
-                    self.expect(TokenKind::KwFn)?;
-                    module
-                        .macros
-                        .push(self.parse_function_like_def(publicity, FunctionKind::Macro)?);
-                }
-                Some(TokenKind::KwLet) => {
-                    self.advance()?;
-                    module.statements.push(self.parse_let_binding(publicity)?);
-                }
-                _ => {
-                    // General statements which are just executed cannot be made public either
-                    if publicity != Publicity::Private {
-                        return Err(self.make_located(
-                            ParseError::PublicModifierOnGenericStatement,
-                            self.current_span(),
-                        ));
-                    }
-                    module.statements.push(self.parse_expression()?);
-                }
-            }
-
-            // A separator or terminator should follow a TLS.
-            self.expect_separator_or_terminator(&TokenKind::Eof)?;
+        // Return errors if there were any
+        if !self.errors.is_empty() {
+            return Err(self.errors);
         }
 
         Ok(module)
+    }
+
+    /// Parses a single top level module statement (TLS) which may or may not be public
+    fn parse_top_level_statement(&mut self, module: &mut Module<FileName>) -> ParseResult<(), FileName> {
+         // Check if this TLS is public or not.
+        let publicity = match self.match_token(TokenKind::KwPub) {
+            Some(_) => Publicity::Public,
+
+            // Default is private.
+            None => Publicity::Private,
+        };
+        let next_kind = self.peek_token().map(|token| token.kind.clone());
+        
+        // Check for any top level statements that can be public
+        // or just a general statement that should be evaluated
+        match next_kind {
+            Some(TokenKind::KwImport) => {
+                // Imports cannot be made "public"/rexported.
+                if publicity != Publicity::Private {
+                    return Err(self.make_located(
+                        ParseError::PublicModifierOnImport,
+                        self.current_span(),
+                    ));
+                }
+
+                module.imports.push(self.parse_import()?);
+            }
+            Some(TokenKind::KwType) => {
+                self.advance()?;
+                module.types.push(self.parse_type_def(publicity)?);
+            }
+            Some(TokenKind::KwFn) => {
+                self.advance()?;
+                module
+                    .functions
+                    .push(self.parse_function_like_def(publicity, FunctionKind::Function)?);
+            }
+            Some(TokenKind::KwMacro) => {
+                self.advance()?;
+                self.expect(TokenKind::KwFn)?;
+                module
+                    .macros
+                    .push(self.parse_function_like_def(publicity, FunctionKind::Macro)?);
+            }
+            Some(TokenKind::KwLet) => {
+                self.advance()?;
+                module.statements.push(self.parse_let_binding(publicity)?);
+            }
+            _ => {
+                // General statements which are just executed cannot be made public either
+                if publicity != Publicity::Private {
+                    return Err(self.make_located(
+                        ParseError::PublicModifierOnGenericStatement,
+                        self.current_span(),
+                    ));
+                }
+                module.statements.push(self.parse_expression()?);
+            }
+        }
+
+        // A separator or terminator should follow a TLS.
+        self.expect_separator_or_terminator(&TokenKind::Eof)?;
+        Ok(())
     }
 
     /// Parses a sequence of `;` separated statements until `terminator`
@@ -442,21 +459,26 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     fn parse_block_contents(
         &mut self,
         terminator: &TokenKind,
-    ) -> ParseResult<Vec<AstNode<FileName>>, FileName> {
+    ) -> Vec<AstNode<FileName>> {
         let mut stmts = Vec::new();
 
         while !self.check(terminator) && !self.is_at_end() {
-            stmts.push(self.parse_expression()?);
+            let result = self.parse_expression();
+            if let Some(stmt) = self.recover(result) {
+                // Each statement should be followed by the separator `;`,
+                // or be the final statement in which case is followed by the
+                // terminator !!
+                //
+                // This function only consumes the separator so the terminator
+                // would fail the loop condition on the next iteration.
+                let sep = self.expect_separator_or_terminator(terminator);
+                self.recover(sep);
 
-            // Each statement should be followed by the separator `;`,
-            // or be the final statement in which case is followed by the
-            // terminator !!
-            //
-            // This function only consumes the separator so the terminator
-            // would fail the loop condition on the next iteration.
-            self.expect_separator_or_terminator(terminator)?;
+                stmts.push(stmt);
+            }
         }
-        Ok(stmts)
+
+        stmts
     }
 
     /// Parses an `import <path> [as <alias>]` statement at the current position
@@ -686,7 +708,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // where the terminator of the last statement is the ``
         //
         // The quote still works on the AST just at a later phase.
-        let stmts = self.parse_block_contents(&TokenKind::MacroQuoteEnd)?;
+        let stmts = self.parse_block_contents(&TokenKind::MacroQuoteEnd);
 
         self.expect(TokenKind::MacroQuoteEnd)?;
         let span = start_span.join(self.previous_span());
@@ -1929,7 +1951,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
             // Blocks `{ ... }`
             TokenKind::DelLBrace => {
-                let stmts = self.parse_block_contents(&TokenKind::DelRBrace)?;
+                let stmts = self.parse_block_contents(&TokenKind::DelRBrace);
                 self.expect(TokenKind::DelRBrace)?;
                 ExprKind::Block(stmts)
             }
@@ -2060,7 +2082,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
             // Macro quote bodies, essentially a block with "`` .. ``" instead of `{ .. }`
             TokenKind::MacroQuoteStart => {
-                let stmts = self.parse_block_contents(&TokenKind::MacroQuoteEnd)?;
+                let stmts = self.parse_block_contents(&TokenKind::MacroQuoteEnd);
                 self.expect(TokenKind::MacroQuoteEnd)?;
                 ExprKind::MacroQuote(stmts)
             },
@@ -2231,5 +2253,54 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// there is actually an expression following it or not
     fn at_expression_boundary(&self) -> bool {
         self.at_statement_boundary() || self.check(&TokenKind::Comma) || self.check(&TokenKind::DelRBrace)
+    }
+
+    /// Take all errors from the parser
+    pub fn take_errors(&mut self) -> Vec<LocatedParseError<FileName>> {
+        core::mem::take(&mut self.errors)
+    }
+
+    /// Record an error and recover to a safe boundary so parsing can continue.
+    fn recover<T>(&mut self, result: ParseResult<T, FileName>) -> Option<T> {
+        match result {
+            Ok(v) => Some(v),
+            Err(e) => {
+                self.errors.push(e);
+                self.find_safe_parsing_boundary();
+                None
+            }
+        }
+    }
+
+    /// Consume tokens until we find a likely statement boundary.
+    /// 
+    /// It is safe to assume thaht parsing can resume after an error at this
+    /// boundary and we can continue reporting parsing errors so that its more 
+    /// friendly to the user.
+    fn find_safe_parsing_boundary(&mut self) {
+        while !self.is_at_end() {
+            // A semicolon is an explicit boundary, its likely the current
+            // errorful expression has ended so try resume from here
+            if self.match_token(TokenKind::Semicolon).is_some() {
+                while self.match_token(TokenKind::Semicolon).is_some() {}
+                return;
+            }
+
+            // These tokens start a new declaration/statement which means the current
+            // errorful expression/declaration/statement should have ended
+            match self.peek_token().map(|t| &t.kind) {
+                Some(
+                    TokenKind::KwFn
+                    | TokenKind::KwType
+                    | TokenKind::KwLet
+                    | TokenKind::KwImport
+                    | TokenKind::KwMacro
+                    | TokenKind::KwPub
+                    // If we are in a block, we can consider } the safe end.
+                    | TokenKind::DelRBrace,
+                ) => return,
+                _ => { let _ = self.advance(); }
+            }
+        }
     }
 }

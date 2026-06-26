@@ -2,7 +2,7 @@
 
 use core::fmt::Display;
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use gluon_debug::{Located, SourceFile, SourceLocation};
 use gluon_lexer::LexError;
 use gluon_parser::{ast::AstNode, errors::ParseError};
@@ -37,7 +37,7 @@ pub enum ModuleResolveError<FileName: Display + Clone + PartialEq, PathResolveEr
 
     /// The sourced dependency module failed parsing
     ParserError {
-        error: Located<ParseError, FileName>
+        errors: Vec<Located<ParseError, FileName>>
     },
 
     /// There was an unexpected non-import expression in the 

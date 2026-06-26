@@ -152,10 +152,10 @@ impl<FileName: Display + Clone + PartialEq + Hash + Eq + Debug, Loader: LoadModu
                 .map_err(|error| ModuleResolveError::LexerError { error })?;
 
             // Parse the source into its module..
-            let mut parser = Parser::new(tokens, Rc::clone(&path));
+            let parser = Parser::new(tokens, Rc::clone(&path));
             let loaded_module = parser
                 .parse_module()
-                .map_err(|error| ModuleResolveError::ParserError { error })?;
+                .map_err(|errors| ModuleResolveError::ParserError { errors })?;
 
             // This is now in progress of resolving its dependencies
             in_progress.push(Rc::clone(&path));

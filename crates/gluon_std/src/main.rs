@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Parse fermion3 source
-    let mut parser = GluonParser::new(
+    let parser = GluonParser::new(
         tokens,
         SourceFile {
             filename: input_path.display().to_string(),
