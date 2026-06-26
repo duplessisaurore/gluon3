@@ -20,7 +20,11 @@ extern crate alloc;
 /// handling name resolution across scopes
 pub mod bindings;
 
-/// The name resolver which walks the parser
+/// The binding resolver which walks the parser
 /// outputted AST and resolves each name to its
 /// corresponding binding.
 pub mod resolver;
+
+/// Errors that can occur during the name
+/// resolution process
+pub mod errors;

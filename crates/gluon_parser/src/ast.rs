@@ -7,6 +7,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use gluon_debug::{Located, SourceFile, Span};
 
+/// A uniquely allocated ID for this module
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialOrd, Hash, PartialEq)]
+pub struct NodeId(pub u64);
+
 /// The root node of a single `Fermion3` source file's parsed output
 /// 
 /// This contains all the AstNodes
@@ -47,7 +51,7 @@ pub struct Module<FileName: Display + Clone + PartialEq> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParserLocated<T: Clone + PartialEq, FileName: Display + Clone + PartialEq> {
     pub inner: Located<T, FileName>,
-    pub node_id: u64
+    pub node_id: NodeId
 }
 
 /// A located ExprKind

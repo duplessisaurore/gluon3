@@ -12,7 +12,7 @@ use gluon_lexer::{Token, TokenKind::{self}};
 
 use crate::{
     ast::{
-        AstNode, EnumVariantDef, ExprKind, Field, Literal, Module, ObjectElement, ParserLocated, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
+        AstNode, EnumVariantDef, ExprKind, Field, Literal, Module, NodeId, ObjectElement, ParserLocated, Pattern, PatternNode, PatternObjectLikeFields, Publicity, TypeParams
     }, errors::{LocatedParseError, ParseError, ParseResult},
 };
 
@@ -271,7 +271,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
                     span: source_span,
                 },
             },
-            node_id: self.node_id
+            node_id: NodeId(self.node_id)
         }
     }
 

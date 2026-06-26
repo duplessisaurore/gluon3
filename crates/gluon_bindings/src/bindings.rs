@@ -195,4 +195,20 @@ impl ScopeTree {
             }
         }
     }
+
+    /// Returns the `FunctionId` of the nearest enclosing `Function` scope
+    /// at or above the provided `scope_idx`. returns None if the `Module` 
+    /// level is hit
+    pub fn owning_function(&self, scope_idx: usize) -> Option<FunctionId> {
+        let mut idx = scope_idx;
+        loop {
+            match &self.scopes[idx].boundary {
+                ScopeBoundary::Function(id) => return Some(*id),
+                ScopeBoundary::Module => return None,
+                ScopeBoundary::Block => {
+                    idx = self.scopes[idx].parent?;
+                }
+            }
+        }
+    }
 }
