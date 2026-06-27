@@ -745,100 +745,16 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
         // Parse the = <node> which is any expression or a object/enum type definition
         //
-        // types are values so a type is produced by an expression.
+        // types are values so a type is produced by an expression, which automatically
+        // handles all of the with/where/fail for us.
         self.expect(TokenKind::Equal)?;
-        let mut node = if self.check(&TokenKind::KwObject) {
+        let node = if self.check(&TokenKind::KwObject) {
             self.parse_object_type_def()?
         } else if self.check(&TokenKind::KwEnum) {
             self.parse_enum_type_def()?
         } else {
             self.parse_type_expression()?
         };
-
-        // Check in a loop for all the additions
-        // `where`, `fail`, `with`.
-        //
-        // We essentially build a recursive `node` constructed
-        // of the base with all the sections attached
-        loop {
-            // `Where` guard section
-            if self.match_token(TokenKind::KwWhere).is_some() {
-                // Empty where is nothing, no point building node off of it
-                if self.match_token(TokenKind::LitUnit).is_some() {
-                    continue;
-                }
-
-                // The closure is wrapped in a set of parens `()`
-                self.expect(TokenKind::DelLParen)?;
-                let guard = Box::new(self.parse_expression()?);
-                self.expect(TokenKind::DelRParen)?;
-
-                // Update the node to include this with the guard.
-                let span = start_span.join(self.previous_span());
-                node = self.make_parser_located(
-                    ExprKind::TypeGuard {
-                        base: Box::new(node),
-                        guard,
-                    },
-                    span,
-                );
-
-            // Guard `fail` section
-            } else if self.match_token(TokenKind::KwFail).is_some() {
-                // Empty fail is nothing
-                if self.match_token(TokenKind::LitUnit).is_some() {
-                    continue;
-                }
-
-                // Also wrapped in `()`
-                self.expect(TokenKind::DelLParen)?;
-                let fail_message = Box::new(self.parse_expression()?);
-                self.expect(TokenKind::DelRParen)?;
-
-                let span = start_span.join(self.previous_span());
-                node = self.make_parser_located(
-                    ExprKind::TypeFail {
-                        base: Box::new(node),
-                        fail_message,
-                    },
-                    span,
-                );
-
-            // `With` methods
-            } else if self.match_token(TokenKind::KwWith).is_some() {
-                // This is a bunch of function definitions wrapped in a set of
-                // braces `{}`
-                self.expect(TokenKind::DelLBrace)?;
-
-                // Build the set of methods this `with` block provides
-                let mut methods = Vec::new();
-
-                // Try grab all function definitions
-                while !self.check(&TokenKind::DelRBrace) && !self.is_at_end() {
-                    self.expect(TokenKind::KwFn)?;
-                    methods.push(
-                        self.parse_function_like_def(Publicity::Private, FunctionKind::Function)?,
-                    );
-
-                    // seperator is required per method until the terminator
-                    self.expect_separator_or_terminator(&TokenKind::DelRBrace)?;
-                }
-
-                // eated the terminator
-                self.expect(TokenKind::DelRBrace)?;
-
-                let span = start_span.join(self.previous_span());
-                node = self.make_parser_located(
-                    ExprKind::TypeWith {
-                        base: Box::new(node),
-                        methods,
-                    },
-                    span,
-                );
-            } else {
-                break;
-            }
-        }
 
         // Make the full type definition from the joined nodes.
         let span = start_span.join(self.previous_span());
@@ -1483,7 +1399,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
     /// `<expr> as <Type>` or `<expr> is <Type>`
     fn parse_typeops(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
         // LHS
-        let mut expr = self.parse_unary()?;
+        let mut expr = self.parse_type_modifiers()?;
 
         loop {
             // At boundary, dont consume any more
@@ -1493,7 +1409,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
             // `as <Type>`
             if self.match_token(TokenKind::KwAs).is_some() {
-                let target_type = self.parse_unary()?;
+                let target_type = self.parse_type_modifiers()?;
                 let span = expr.get_span().join(target_type.get_span());
 
                 // fold RHS type
@@ -1507,7 +1423,7 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
 
             // `is <Type>`
             } else if self.match_token(TokenKind::KwIs).is_some() {
-                let target_type = self.parse_unary()?;
+                let target_type = self.parse_type_modifiers()?;
                 let span = expr.get_span().join(target_type.get_span());
 
                 // fold RHS type
@@ -1528,6 +1444,107 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
         // Return our typeops expr if we have one,
         // or the unary LHS result
         Ok(expr)
+    }
+
+    /// The type modifiers should be allowed to act on any expression
+    /// logically as a type can be inlined and is a normal expression.
+    /// (deriverative of the "everything is an expression idea")
+    ///
+    /// 
+    /// This parses the type modifiers that being
+    /// `where`, `fail` and `with`
+    fn parse_type_modifiers(&mut self) -> ParseResult<AstNode<FileName>, FileName> {
+        let start_span = self.current_span();
+
+        // Parse the `LHS` that we modify first with the modifiers.
+        let mut node = self.parse_unary()?;
+
+        // Check in a loop for all the additions
+        // `where`, `fail`, `with`.
+        //
+        // We essentially build a recursive `node` constructed
+        // of the base with all the sections attached
+        loop {
+            // `Where` guard section
+            if self.match_token(TokenKind::KwWhere).is_some() {
+                // Empty where is nothing, no point building node off of it
+                if self.match_token(TokenKind::LitUnit).is_some() {
+                    continue;
+                }
+
+                // The closure is wrapped in a set of parens `()`
+                self.expect(TokenKind::DelLParen)?;
+                let guard = Box::new(self.parse_expression()?);
+                self.expect(TokenKind::DelRParen)?;
+
+                // Update the node to include this with the guard.
+                let span = start_span.join(self.previous_span());
+                node = self.make_parser_located(
+                    ExprKind::TypeGuard {
+                        base: Box::new(node),
+                        guard,
+                    },
+                    span,
+                );
+
+            // Guard `fail` section
+            } else if self.match_token(TokenKind::KwFail).is_some() {
+                // Empty fail is nothing
+                if self.match_token(TokenKind::LitUnit).is_some() {
+                    continue;
+                }
+
+                // Also wrapped in `()`
+                self.expect(TokenKind::DelLParen)?;
+                let fail_message = Box::new(self.parse_expression()?);
+                self.expect(TokenKind::DelRParen)?;
+
+                let span = start_span.join(self.previous_span());
+                node = self.make_parser_located(
+                    ExprKind::TypeFail {
+                        base: Box::new(node),
+                        fail_message,
+                    },
+                    span,
+                );
+
+            // `With` methods
+            } else if self.match_token(TokenKind::KwWith).is_some() {
+                // This is a bunch of function definitions wrapped in a set of
+                // braces `{}`
+                self.expect(TokenKind::DelLBrace)?;
+
+                // Build the set of methods this `with` block provides
+                let mut methods = Vec::new();
+
+                // Try grab all function definitions
+                while !self.check(&TokenKind::DelRBrace) && !self.is_at_end() {
+                    self.expect(TokenKind::KwFn)?;
+                    methods.push(
+                        self.parse_function_like_def(Publicity::Private, FunctionKind::Function)?,
+                    );
+
+                    // seperator is required per method until the terminator
+                    self.expect_separator_or_terminator(&TokenKind::DelRBrace)?;
+                }
+
+                // eated the terminator
+                self.expect(TokenKind::DelRBrace)?;
+
+                let span = start_span.join(self.previous_span());
+                node = self.make_parser_located(
+                    ExprKind::TypeWith {
+                        base: Box::new(node),
+                        methods,
+                    },
+                    span,
+                );
+            } else {
+                break;
+            }
+        }
+
+        Ok(node)
     }
 
     /// Sadly for unary operators we need a restricted
