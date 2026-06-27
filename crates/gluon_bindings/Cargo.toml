@@ -17,3 +17,4 @@ hashbrown = { workspace = true }
 gluon_debug = { workspace = true }
 gluon_lexer = { workspace = true }
 gluon_parser = { workspace = true }
+gluon_module_resolver = { workspace = true }

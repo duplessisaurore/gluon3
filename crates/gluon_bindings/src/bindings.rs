@@ -7,14 +7,14 @@
 
 use core::{fmt::Display, ops::Deref};
 
-use alloc::{string::String, vec::Vec};
-use gluon_debug::{Located, SourceLocation};
+use alloc::{rc::Rc, string::String, vec::Vec};
+use gluon_debug::{Located, SourceFile, SourceLocation};
 use gluon_parser::ast::Publicity;
 use hashbrown::HashMap;
 
 /// All possible kinds of bindings in Fermion3
 #[derive(Debug, Clone)]
-pub enum BindingKind {
+pub enum BindingKind<FileName: Display + Clone + PartialEq> {
     // Local-level bindings
     /// A parameter to some function
     Parameter,
@@ -42,7 +42,7 @@ pub enum BindingKind {
     Macro { publicity: Publicity },
 
     /// An imported module object (e.g. `import "math.f3" as m`)
-    Import { path: String },
+    Import { path: Rc<SourceFile<FileName>> },
 }
 
 /// A unique ID representing some binding
@@ -68,13 +68,13 @@ pub struct ScopeId(pub usize);
 /// And some `kind` which represents what kind of
 /// binding this represents
 #[derive(Debug, Clone)]
-pub struct BindingItem {
+pub struct BindingItem<FileName: Display + Clone + PartialEq> {
     pub id: BindingId,
     pub name: String,
-    pub kind: BindingKind,
+    pub kind: BindingKind<FileName>,
 }
 
-pub type Binding<FileName> = Located<BindingItem, FileName>;
+pub type Binding<FileName> = Located<BindingItem<FileName>, FileName>;
 
 /// What kind of boundary is this scope/what is
 /// this scoping in?
@@ -166,7 +166,7 @@ impl<FileName: Display + Clone + PartialEq> ScopeTree<FileName> {
     pub fn define(
         &mut self,
         name: String,
-        kind: BindingKind,
+        kind: BindingKind<FileName>,
         location: SourceLocation<FileName>,
     ) -> BindingId {
         let id = BindingId(self.next_binding_id);
