@@ -5,11 +5,10 @@
 use core::fmt::Display;
 
 use alloc::{rc::Rc, string::String, vec::Vec};
-use gluon_debug::{Located, SourceLocation, Span};
+use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_module_resolver::LoadModule;
 use gluon_parser::ast::{
-    ArrayElement, AstNode, ExprKind, Module, NodeId, ObjectElement, Pattern, PatternNode,
-    PatternObjectLikeFields,
+    ArrayElement, AstNode, ExprKind, Module, NodeId, ObjectElement, Pattern, PatternNode, PatternObjectLikeFields, Publicity,
 };
 use hashbrown::HashMap;
 
@@ -18,6 +17,17 @@ use crate::{
     bindings::{Binding, BindingId, BindingKind, FunctionId, ScopeBoundary, ScopeId, ScopeTree},
     errors::{BindingResolveError, BindingResolveErrorKind, BindingResolveResult},
 };
+
+
+/// A cross-field resolution to a different module
+/// with a different `ScopeTree`
+#[derive(Debug)]
+pub struct ModuleFieldResolution<FileName: Display + Clone + PartialEq> {
+    /// Which module's ScopeTree the binding_id lives in
+    pub target_module: Rc<SourceFile<FileName>>,
+    pub binding_id: BindingId,
+}
+
 
 /// The output of the binding resolution/name resolution phase
 ///
@@ -34,10 +44,49 @@ pub struct BindingResolutionMap<FileName: Display + Clone + PartialEq> {
 
     /// What bindings each function closes over, by FunctionId.
     pub captures: HashMap<FunctionId, Vec<BindingId>>,
+
+    /// Field accesses on module imports that are pending from this
+    /// one module. 
+    /// 
+    /// This is pub(crate) because it is only visible to this phase while
+    /// we are working on building `module_field_resolutions`
+    pub(crate) pending_module_accesses: Vec<PendingModuleAccess>,
+
+    /// Field accesses to a module that have been resolved and
+    /// point to a binding in a seperate module
+    pub module_field_resolutions: HashMap<NodeId, ModuleFieldResolution<FileName>>,
+}
+
+/// This is a module field access that is pending
+///
+/// The current resolver here only resolves per-module
+/// as opposed to cross-module, so we record it's pending
+/// cross-module accesses for the later cross module phase
+/// to use during it's resolving.
+#[derive(Debug)]
+pub struct PendingModuleAccess {
+    /// NodeId of the FieldAccess node itself.
+    pub access_node_id: NodeId,
+
+    /// The BindingId of the Import binding being field-accessed.
+    pub import_binding_id: BindingId,
+
+    /// The field name in the module being accessed.
+    pub field: String,
+
+    /// Span of the field access.
+    pub span: Span,
 }
 
 /// The actual binding resolver clas itself
-pub struct BindingResolver<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader: LoadModule<FileName>> {
+pub struct BindingResolver<
+    'module,
+    'loader,
+    'simplifier,
+    FileName: Display + Clone + PartialEq,
+    PS: PathSimplifier,
+    Loader: LoadModule<FileName>,
+> {
     /// The current output resolution map being built
     resolution_map: BindingResolutionMap<FileName>,
 
@@ -45,34 +94,41 @@ pub struct BindingResolver<'module, FileName: Display + Clone + PartialEq, PS: P
     module: &'module Module<FileName>,
 
     /// All errors accumulated during binding resolution
-    errors: Vec<BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError>>,
+    errors:
+        Vec<BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError>>,
 
     /// The last allocated function ID, we increasingly increment this
     /// monotonically to continue having unique FunctionIds's.
     next_function_id: usize,
 
     /// The path simplifier we are using for imports
-    path_simplifier: PS,
+    path_simplifier: &'simplifier mut PS,
 
     /// The loader. This is important for imports as we need
     /// to resolve it down to a source file again since the module
     /// loader only builds the ResolvedGraph.
-    loader: Loader
+    loader: &'loader mut Loader,
 }
 
-impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader: LoadModule<FileName>>
-    BindingResolver<'module, FileName, PS, Loader>
+impl<
+    'module,
+    'loader,
+    'simplifier,
+    FileName: Display + Clone + PartialEq,
+    PS: PathSimplifier,
+    Loader: LoadModule<FileName>,
+> BindingResolver<'module, 'loader, 'simplifier, FileName, PS, Loader>
 {
     /// Create a new binding resolver over `module` that will resolve all of the
     /// bindings into a singular `BindingResolutionMap` for this module
-    pub fn new(module: &'module Module<FileName>, path_simplifier: PS, loader: Loader) -> Self {
+    pub fn new(module: &'module Module<FileName>, path_simplifier: &'simplifier mut PS, loader: &'loader mut Loader) -> Self {
         Self {
             resolution_map: BindingResolutionMap::new(),
             errors: Vec::new(),
             module,
             next_function_id: 0,
             path_simplifier,
-            loader
+            loader,
         }
     }
 
@@ -118,7 +174,11 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
             match stmt.get_kind_ref() {
                 // The actual inner pattern binding stuff was alr registered above so not much here other
                 // than resolving_expr
-                ExprKind::LetBinding { annotation, initializer, .. } => {
+                ExprKind::LetBinding {
+                    annotation,
+                    initializer,
+                    ..
+                } => {
                     if let Some(ann) = annotation {
                         self.resolve_expr(ann);
                     }
@@ -169,9 +229,13 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
                             }
 
                             // Resolve path again down to the SourceFile
-                            let resolved_path_result = self.loader.resolve_source_file(&path).map_err(|error|
-                                self.make_located(BindingResolveErrorKind::PathResolveError { error }, import.get_span())
-                            );
+                            let resolved_path_result =
+                                self.loader.resolve_source_file(&path).map_err(|error| {
+                                    self.make_located(
+                                        BindingResolveErrorKind::PathResolveError { error },
+                                        import.get_span(),
+                                    )
+                                });
                             let Some(resolved_path) = self.recover(resolved_path_result) else {
                                 continue;
                             };
@@ -179,7 +243,9 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
                             // As it's unique, resolve it as a new binding
                             self.resolve_new_binding(
                                 alias,
-                                BindingKind::Import { path: Rc::new(resolved_path) },
+                                BindingKind::Import {
+                                    path: Rc::new(resolved_path),
+                                },
                                 import.node_id,
                                 import.get_span(),
                             )
@@ -209,16 +275,22 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
                                 }
 
                                 // Resolve path again down to the SourceFile
-                                let resolved_path_result = self.loader.resolve_source_file(&path).map_err(|error|
-                                    self.make_located(BindingResolveErrorKind::PathResolveError { error }, import.get_span())
-                                );
+                                let resolved_path_result =
+                                    self.loader.resolve_source_file(&path).map_err(|error| {
+                                        self.make_located(
+                                            BindingResolveErrorKind::PathResolveError { error },
+                                            import.get_span(),
+                                        )
+                                    });
                                 let Some(resolved_path) = self.recover(resolved_path_result) else {
                                     continue;
                                 };
 
                                 self.resolve_new_binding(
                                     path_ident,
-                                    BindingKind::Import { path: Rc::new(resolved_path) },
+                                    BindingKind::Import {
+                                        path: Rc::new(resolved_path),
+                                    },
                                     import.node_id,
                                     import.get_span(),
                                 )
@@ -379,7 +451,11 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
     }
 
     /// Introduce the bindings given by a pattern into the current scope
-    fn introduce_pattern_bindings(&mut self, pattern: &PatternNode<FileName>, kind: BindingKind<FileName>) {
+    fn introduce_pattern_bindings(
+        &mut self,
+        pattern: &PatternNode<FileName>,
+        kind: BindingKind<FileName>,
+    ) {
         match pattern.get_kind_ref() {
             // Neither introduces any binding
             Pattern::Wildcard | Pattern::Lit(_) => {}
@@ -456,7 +532,8 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
         expected: impl Into<String>,
         kind: ExprKind<FileName>,
         span: Span,
-    ) -> BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError> {
+    ) -> BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError>
+    {
         self.make_located(
             BindingResolveErrorKind::UnexpectedExprKind {
                 expected: expected.into(),
@@ -474,7 +551,8 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
         &self,
         binding: &Binding<FileName>,
         span: Span,
-    ) -> BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError> {
+    ) -> BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError>
+    {
         self.make_located(
             BindingResolveErrorKind::DuplicateTopLevelDefinition {
                 name: binding.kind.name.clone(),
@@ -530,17 +608,23 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
         node_id: NodeId,
         span: Span,
     ) {
-        let binding_id =
-            self.resolution_map
-                .scope_tree
-                .define(name.into(), binding_kind, self.make_location(span));
+        let binding_id = self.resolution_map.scope_tree.define(
+            name.into(),
+            binding_kind,
+            self.make_location(span),
+        );
         self.resolution_map.resolutions.insert(node_id, binding_id);
     }
 
     /// Record an error, returning Some(T) if to continue, else None
     fn recover<T>(
         &mut self,
-        result: BindingResolveResult<T, FileName, PS::PathSimplificationError, Loader::ResolveSourceError>,
+        result: BindingResolveResult<
+            T,
+            FileName,
+            PS::PathSimplificationError,
+            Loader::ResolveSourceError,
+        >,
     ) -> Option<T> {
         match result {
             Ok(v) => Some(v),
@@ -1029,9 +1113,30 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
 
             // Only the expression is resolved itself.
             // We cannot really resolve the actual access itself because type information
-            // is required at this point.
-            ExprKind::FieldAccess { expr, .. } => {
+            // is required at this point (other than for modules).
+            ExprKind::FieldAccess { expr, field } => {
                 self.resolve_expr(expr);
+
+                // If the object resolved to an Import binding, then add
+                // a pending module access for validation during cross module
+                // resolution.
+                if let Some(&binding_id) = self.resolution_map.resolutions.get(&expr.node_id) {
+                    if let Some(binding) =
+                        self.resolution_map.scope_tree.lookup_binding(&binding_id)
+                    {
+                        // We have an import! add all of the pending stuff so we can resolve it later..
+                        if matches!(&binding.kind.kind, BindingKind::Import { .. }) {
+                            self.resolution_map
+                                .pending_module_accesses
+                                .push(PendingModuleAccess {
+                                    access_node_id: node.node_id,
+                                    import_binding_id: binding_id,
+                                    field: field.clone(),
+                                    span: node.get_span(),
+                                });
+                        }
+                    }
+                }
             }
 
             ExprKind::IndexAccess { expr, index } => {
@@ -1194,6 +1299,7 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier, Loader:
             _ => {}
         }
     }
+    
 }
 
 impl<FileName: Display + PartialEq + Clone> BindingResolutionMap<FileName> {
@@ -1203,6 +1309,26 @@ impl<FileName: Display + PartialEq + Clone> BindingResolutionMap<FileName> {
             resolutions: HashMap::new(),
             scope_tree: ScopeTree::new(),
             captures: HashMap::new(),
+            pending_module_accesses: Vec::new(),
+            module_field_resolutions: HashMap::new(),
         }
+    }
+
+    /// Look up `name` in this module's root scope and return its Publicity
+    pub fn find_public_export(&self, name: &str) -> Option<(BindingId, Publicity)> {
+        // Fnd the binding in the root scope
+        let (binding_id, _) = self.scope_tree.resolve_name_in_root(name)?;
+        let binding = self.scope_tree.lookup_binding(&binding_id)?;
+
+        // Return its publicity (or default to Private)
+        let is_public = match &binding.kind.kind {
+            BindingKind::Function { publicity, .. }
+            | BindingKind::Type { publicity }
+            | BindingKind::Macro { publicity }
+            | BindingKind::Let { publicity, .. } => *publicity, // assuming bool; adjust if Publicity enum
+            // Imports, locals, and parameters are never directly exported
+            _ => Publicity::Private,
+        };
+        Some((binding_id, is_public))
     }
 }

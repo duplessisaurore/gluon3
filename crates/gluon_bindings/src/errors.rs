@@ -2,8 +2,8 @@
 
 use core::fmt::Display;
 
-use alloc::string::String;
-use gluon_debug::{Located, SourceLocation} ;
+use alloc::{rc::Rc, string::String, vec::Vec};
+use gluon_debug::{Located, SourceFile, SourceLocation} ;
 use gluon_parser::ast::ExprKind;
 
 /// Result of one step of the binding resolving process
@@ -61,4 +61,36 @@ pub enum BindingResolveErrorKind<FileName: Display + Clone + PartialEq, PathSimp
     PathResolveError {
         error: ResolveSourceError
     }
+}
+
+/// Errors that can occur during the cross-module
+/// resolution process
+#[derive(Debug)]
+pub enum CrossModuleError<FileName, PathErr, ResolveErr>
+where
+    FileName: Display + Clone + PartialEq,
+{
+    /// Binding resolution failed for an individual module.
+    PerModuleErrors {
+        source_file: Rc<SourceFile<FileName>>,
+        errors: Vec<BindingResolveError<FileName, PathErr, ResolveErr>>,
+    },
+
+    /// When trying to resolve the `module.field` access
+    /// 
+    /// There does not exist such an export in the target module
+    NoSuchExport {
+        location: SourceLocation<FileName>,
+        module_path: Rc<SourceFile<FileName>>,
+        field: String,
+    },
+
+    /// When trying to resolve the `module.field` access
+    /// 
+    /// The item exists but is private!
+    PrivateExport {
+        location: SourceLocation<FileName>,
+        module_path: Rc<SourceFile<FileName>>,
+        field: String,
+    },
 }

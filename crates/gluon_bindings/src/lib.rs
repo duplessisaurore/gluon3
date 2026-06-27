@@ -32,3 +32,8 @@ pub mod errors;
 /// Trait for simplifying paths down to the
 /// actual binding name for imports
 pub mod binding_trait;
+
+/// The cross-module resolution handler
+/// which takes a `ResolvedGraph` and runs
+/// the `BindingResolver` on each module
+pub mod cross_module_resolver;

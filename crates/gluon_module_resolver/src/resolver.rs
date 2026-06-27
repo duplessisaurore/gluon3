@@ -25,29 +25,29 @@ use crate::{LoadModule, ModuleResolveError, errors::ModuleResolveResult};
 pub struct ResolvedGraph<FileName: Display + Clone + PartialEq + Hash> {
     /// This is a mapping of the name of the file
     /// to its actual `Module` which has been loaded and parsed.
-    modules: HashMap<Rc<SourceFile<FileName>>, Module<FileName>>,
+    pub modules: HashMap<Rc<SourceFile<FileName>>, Module<FileName>>,
 }
 
 /// The actual module loader type itself
 ///
 /// The loader is responsible for actually finding the files
 /// and getting their source contents.
-pub struct ModuleLoader<FileName: Display + Clone + PartialEq + Debug, Loader: LoadModule<FileName>>
+pub struct ModuleLoader<'loader, FileName: Display + Clone + PartialEq + Debug, Loader: LoadModule<FileName>>
 {
     /// The initial module from which all dependencies are
     /// branching out of, as a binary can only have one entry point
     module: Module<FileName>,
 
     /// The loader to find all other files and their contents
-    loader: Loader,
+    loader: &'loader mut Loader,
 }
 
-impl<FileName: Display + Clone + PartialEq + Hash + Eq + Debug, Loader: LoadModule<FileName>>
-    ModuleLoader<FileName, Loader>
+impl<'loader, FileName: Display + Clone + PartialEq + Hash + Eq + Debug, Loader: LoadModule<FileName>>
+    ModuleLoader<'loader, FileName, Loader>
 {
     /// Create a new module loader over `module` that will parse all of the
     /// imports and depdenencies into a singular `ResolvedGraph` for this
-    pub fn new(module: Module<FileName>, loader: Loader) -> Self {
+    pub fn new(module: Module<FileName>, loader: &'loader mut Loader) -> Self {
         Self { module, loader }
     }
 

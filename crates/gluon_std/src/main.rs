@@ -85,15 +85,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Load all dependent modules
-    let loader = ModuleLoader::new(
-        ast,
-        StdLoader {
-            cwd: std::env::current_dir()?,
-            included_dirs,
-        },
-    );
+    let mut loader = StdLoader {
+        cwd: std::env::current_dir()?,
+        included_dirs,
+    };
+    let module_loader = ModuleLoader::new(ast, &mut loader);
 
-    let resolved_graph = loader.resolve_modules().unwrap_or_else(|e| {
+    let resolved_graph = module_loader.resolve_modules().unwrap_or_else(|e| {
         eprintln!("module resolving error: {:?}", e);
         process::exit(1);
     });
@@ -134,7 +132,6 @@ impl LoadModule<String> for StdLoader {
                     let mut test_included = (*included_dir).clone();
                     test_included.push(this_path.clone());
 
-
                     test_included
                         .try_exists()
                         .map_err(|error| ResolveModuleError::TestingFileExists { error })
@@ -146,7 +143,7 @@ impl LoadModule<String> for StdLoader {
                     if let Some(path) = path {
                         let mut valid_path = path.clone();
                         valid_path.push(this_path.clone());
-                        
+
                         // And since we may have .. or whatever try clean up the path
                         if let Ok(cleaned_path) = valid_path.clean_path() {
                             valid_path = cleaned_path;
@@ -156,11 +153,9 @@ impl LoadModule<String> for StdLoader {
                     }
                     path.cloned()
                 })? {
-                Some(file_path) => {
-                    SourceFile {
-                        filename: file_path.to_string_lossy().to_string(),
-                    }
-                }
+                Some(file_path) => SourceFile {
+                    filename: file_path.to_string_lossy().to_string(),
+                },
 
                 // Absolutize and assume it must be in the current dir
                 // since it didnt exist in any of our included dirs

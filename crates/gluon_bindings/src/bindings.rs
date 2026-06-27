@@ -225,6 +225,30 @@ impl<FileName: Display + Clone + PartialEq> ScopeTree<FileName> {
         }
     }
 
+    /// Looks up a name, starting from the root scope
+    /// and moving up its parents until found or the root is reached.
+    pub fn resolve_name_in_root(&self, name: &str) -> Option<(BindingId, ScopeId)> {
+        // Start from the current scope
+        let mut current_idx = self.current_scope_idx;
+
+        // Find root scope
+        loop {
+            let scope = &self.scopes[current_idx];
+
+            // Move up to parent
+            if let Some(parent_idx) = scope.parent {
+                current_idx = *parent_idx;
+            } else {
+                // Root scope, try here or it doesn't exist.
+                if let Some(binding_id) = scope.bindings.get(name) {
+                    return Some((*binding_id, ScopeId(current_idx)));
+                }
+
+                return None;
+            }
+        }
+    }
+
     /// Returns the `FunctionId` of the nearest enclosing `Function` scope
     /// at or above the provided `scope_id`'s `Scope`. returns None if the `Module`
     /// level is hit
