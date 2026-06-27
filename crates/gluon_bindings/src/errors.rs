@@ -3,7 +3,7 @@
 use core::fmt::Display;
 
 use alloc::string::String;
-use gluon_debug::{Located, SourceLocation, Span} ;
+use gluon_debug::{Located, SourceLocation} ;
 use gluon_parser::ast::ExprKind;
 
 /// Result of one step of the binding resolving process

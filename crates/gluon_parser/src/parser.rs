@@ -619,9 +619,16 @@ impl<FileName: Display + Clone + PartialEq + DebugTrait> Parser<FileName> {
             //
             // e.g Point { x: my_x, y: my_y } or WrappedPoint { point: Point { x, y }}
             let payload = if self.match_token(TokenKind::Colon).is_some() {
-                Some(self.parse_pattern()?)
+                self.parse_pattern()?
             } else {
-                None
+                // Desugar `Point { x }` into `Point { x: x }`, this 
+                // will be useful for the future.
+                self.make_parser_located(
+                    Pattern::Identifier(name.clone()),
+
+                    // This is kind of a virtual node, so it has the same span for errors.
+                    self.previous_span(),
+                )
             };
 
             fields.push(Field { name, payload });

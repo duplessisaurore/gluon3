@@ -2,7 +2,7 @@ use core::fmt::Display;
 
 use alloc::{rc::Rc, string::String, vec::Vec};
 use gluon_debug::{Located, SourceLocation, Span};
-use gluon_parser::ast::{ExprKind, Module, NodeId};
+use gluon_parser::ast::{ExprKind, Module, NodeId, Pattern, PatternNode, PatternObjectLikeFields};
 use hashbrown::HashMap;
 
 use crate::{
@@ -84,6 +84,22 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
         // Register all module TLS so that things can refer to eachother 
         self.module_pre_pass();
 
+        // Resolve bodies of all top-level items now
+        for import in &self.module.imports.clone() {
+            self.resolve_expr(import);
+        }
+        for typedef in &self.module.types.clone() {
+            self.resolve_expr(typedef);
+        }
+        for function in &self.module.functions.clone() {
+            self.resolve_expr(function);
+        }
+        for macrodef in &self.module.macros.clone() {
+            self.resolve_expr(macrodef);
+        }
+        for stmt in &self.module.statements.clone() {
+            self.resolve_expr(stmt);
+        }
 
         if !self.errors.is_empty() {
             return Err(self.errors);
@@ -102,6 +118,7 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
         self.function_pre_pass();
         self.typedef_pre_pass();
         self.macro_pre_pass();
+        self.let_pre_pass()
     }
 
     /// This will do a pre-pass of the `Module` to resolve all import statements
@@ -178,7 +195,7 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
     /// This will do a pre-pass of the `Module` to resolve all function statements
     pub fn function_pre_pass(&mut self) {
         for function in &self.module.functions {
-            match function.get_kind_ref().clone() {
+            match function.get_kind_ref() {
                 ExprKind::FunctionDef { name, publicity, .. } => {
                     let Some(fn_name) = name else {
                         continue;
@@ -195,8 +212,8 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
                     // Allocate a unique function ID for this function.
                     let function_id = self.allocate_function_id();
                     self.resolve_new_binding(
-                        fn_name,
-                        BindingKind::Function { id: function_id, publicity },
+                        fn_name.clone(),
+                        BindingKind::Function { id: function_id, publicity: *publicity },
                         function.node_id,
                         function.get_span(),
                     )
@@ -204,7 +221,7 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
                 other => {
                     // Error.. just ignore and try the next statement
                     self.errors
-                        .push(self.unexpected_expr_kind("<function>", other, function.get_span()));
+                        .push(self.unexpected_expr_kind("<function>", other.clone(), function.get_span()));
                     continue;
                 }
             }
@@ -214,7 +231,7 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
     /// This will do a pre-pass of the `Module` to resolve all typedef statements
     pub fn typedef_pre_pass(&mut self) {
         for typedef in &self.module.types {
-            match typedef.get_kind_ref().clone() {
+            match typedef.get_kind_ref() {
                 ExprKind::TypeDef { name, publicity, .. } => {
                     // Check for uniqueness
                     if let Some(binding) = self.resolve_binding(&name) {
@@ -225,8 +242,8 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
                     }
 
                     self.resolve_new_binding(
-                        name,
-                        BindingKind::Type { publicity },
+                        name.clone(),
+                        BindingKind::Type { publicity: *publicity },
                         typedef.node_id,
                         typedef.get_span(),
                     )
@@ -234,7 +251,7 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
                 other => {
                     // Error.. just ignore and try the next statement
                     self.errors
-                        .push(self.unexpected_expr_kind("<type>", other, typedef.get_span()));
+                        .push(self.unexpected_expr_kind("<type>", other.clone(), typedef.get_span()));
                     continue;
                 }
             }
@@ -244,7 +261,7 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
     /// This will do a pre-pass of the `Module` to resolve all macro statements
     pub fn macro_pre_pass(&mut self) {
         for macrodef in &self.module.macros {
-            match macrodef.get_kind_ref().clone() {
+            match macrodef.get_kind_ref() {
                 ExprKind::MacroDef { name, publicity, .. } => {
                     // Check for uniqueness
                     if let Some(binding) = self.resolve_binding(&name) {
@@ -255,8 +272,8 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
                     }
 
                     self.resolve_new_binding(
-                        name,
-                        BindingKind::Macro { publicity },
+                        name.clone(),
+                        BindingKind::Macro { publicity: *publicity },
                         macrodef.node_id,
                         macrodef.get_span(),
                     )
@@ -264,10 +281,99 @@ impl<'module, FileName: Display + Clone + PartialEq, PS: PathSimplifier>
                 other => {
                     // Error.. just ignore and try the next statement
                     self.errors
-                        .push(self.unexpected_expr_kind("<macro>", other, macrodef.get_span()));
+                        .push(self.unexpected_expr_kind("<macro>", other.clone(), macrodef.get_span()));
                     continue;
                 }
             }
+        }
+    }
+
+    /// This will do a pre-pass of the `Module` to resolve all Global lets
+    pub fn let_pre_pass(&mut self) {
+        for letdef in &self.module.statements {
+            match letdef.get_kind_ref() {
+                ExprKind::LetBinding { is_mutable, pattern, publicity, .. } => {
+                    // Register the binding with the patterns in mind.
+                    self.introduce_pattern_bindings(
+                        pattern,
+                        BindingKind::Let { is_mutable: *is_mutable, publicity: *publicity },
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+
+    /// Introduce the bindings given by a pattern into the current scope
+    fn introduce_pattern_bindings(
+        &mut self,
+        pattern: &PatternNode<FileName>,
+        kind: BindingKind,
+    ) {
+        match pattern.get_kind_ref() {
+            // Neither introduces any binding
+            Pattern::Wildcard | Pattern::Lit(_) => {}
+
+            // This introduces the identifier
+            Pattern::Identifier(name) => {
+                self.resolve_new_binding(
+                    name.clone(),
+                    kind,
+                    pattern.node_id,
+                    pattern.get_span(),
+                );
+            }
+
+            // This introduces all of the before, rest and after patterns.
+            Pattern::Array { before, rest, after } => {
+                for pat in before {
+                    self.introduce_pattern_bindings(pat, kind.clone());
+                }
+                if let Some(rest_pat) = rest {
+                    self.introduce_pattern_bindings(rest_pat, kind.clone());
+                }
+                for pat in after {
+                    self.introduce_pattern_bindings(pat, kind.clone());
+                }
+            }
+
+            // This introduces all the fields as bindings
+            Pattern::Object { target_type, fields } => {
+                // Resolve the type reference
+                if let Some(typeref) = target_type {
+                    self.resolve_expr(typeref);
+                }
+                self.introduce_object_like_field_bindings(fields, kind);
+            }
+
+            // Similar to the object
+            Pattern::EnumVariant { enum_type, fields, .. } => {
+                self.resolve_expr(enum_type);
+                if let Some(fields) = fields {
+                    self.introduce_object_like_field_bindings(fields, kind);
+                }
+            }
+
+            // Macros, todo later
+            Pattern::Quote(body) => {
+                todo!()
+            }
+            Pattern::UnhygienicIdentifier(name) => {
+                todo!()
+            }
+        }
+    }
+
+    /// Introduces bindings for object and enum variant field 
+    /// patterns since they have identical field types
+    fn introduce_object_like_field_bindings(
+        &mut self,
+        fields: &PatternObjectLikeFields<FileName>,
+        kind: BindingKind,
+    ) {
+        for field in fields {
+            self.introduce_pattern_bindings(&field.payload, kind.clone());
         }
     }
 

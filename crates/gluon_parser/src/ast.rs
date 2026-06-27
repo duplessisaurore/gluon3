@@ -541,9 +541,11 @@ pub enum ExprKind<FileName: Display + Clone + PartialEq> {
 /// we don't want more coupling
 ///
 /// In this case it's a vec because we can have zero or more fields,
-/// each field is required with some name, but the payload is optional
-/// as in a pattern we can optionally rebind or destructure the field more.
-pub type PatternObjectLikeFields<FileName> = Vec<Field<Option<PatternNode<FileName>>>>;
+/// each field is required with some name.
+/// 
+/// The payload is also non-optional, for the simple case where a field
+/// has no value, the parser will desugar it to x: x etc.
+pub type PatternObjectLikeFields<FileName> = Vec<Field<PatternNode<FileName>>>;
 
 /// A possible pattern/destructuring pattern
 /// 
