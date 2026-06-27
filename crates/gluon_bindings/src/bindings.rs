@@ -43,6 +43,9 @@ pub enum BindingKind<FileName: Display + Clone + PartialEq> {
 
     /// An imported module object (e.g. `import "math.f3" as m`)
     Import { path: Rc<SourceFile<FileName>> },
+
+    /// A built-in non user primitive binding
+    Builtin
 }
 
 /// A unique ID representing some binding

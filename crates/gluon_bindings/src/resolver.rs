@@ -4,20 +4,25 @@
 
 use core::fmt::Display;
 
-use alloc::{rc::Rc, string::String, vec::Vec};
+use alloc::{
+    rc::Rc,
+    string::{String, ToString},
+    vec::Vec,
+};
 use gluon_debug::{Located, SourceFile, SourceLocation, Span};
 use gluon_module_resolver::LoadModule;
 use gluon_parser::ast::{
-    ArrayElement, AstNode, ExprKind, Module, NodeId, ObjectElement, Pattern, PatternNode, PatternObjectLikeFields, Publicity,
+    ArrayElement, AstNode, ExprKind, Module, NodeId, ObjectElement, Pattern, PatternNode,
+    PatternObjectLikeFields, Publicity,
 };
 use hashbrown::HashMap;
 
 use crate::{
+    Builtins,
     binding_trait::PathSimplifier,
     bindings::{Binding, BindingId, BindingKind, FunctionId, ScopeBoundary, ScopeId, ScopeTree},
     errors::{BindingResolveError, BindingResolveErrorKind, BindingResolveResult},
 };
-
 
 /// A cross-field resolution to a different module
 /// with a different `ScopeTree`
@@ -27,7 +32,6 @@ pub struct ModuleFieldResolution<FileName: Display + Clone + PartialEq> {
     pub target_module: Rc<SourceFile<FileName>>,
     pub binding_id: BindingId,
 }
-
 
 /// The output of the binding resolution/name resolution phase
 ///
@@ -46,8 +50,8 @@ pub struct BindingResolutionMap<FileName: Display + Clone + PartialEq> {
     pub captures: HashMap<FunctionId, Vec<BindingId>>,
 
     /// Field accesses on module imports that are pending from this
-    /// one module. 
-    /// 
+    /// one module.
+    ///
     /// This is pub(crate) because it is only visible to this phase while
     /// we are working on building `module_field_resolutions`
     pub(crate) pending_module_accesses: Vec<PendingModuleAccess>,
@@ -83,6 +87,7 @@ pub struct BindingResolver<
     'module,
     'loader,
     'simplifier,
+    'builtins,
     FileName: Display + Clone + PartialEq,
     PS: PathSimplifier,
     Loader: LoadModule<FileName>,
@@ -108,20 +113,29 @@ pub struct BindingResolver<
     /// to resolve it down to a source file again since the module
     /// loader only builds the ResolvedGraph.
     loader: &'loader mut Loader,
+
+    /// The set of builtins we are using for resolving
+    builtins: &'builtins Builtins,
 }
 
 impl<
     'module,
     'loader,
     'simplifier,
+    'builtins,
     FileName: Display + Clone + PartialEq,
     PS: PathSimplifier,
     Loader: LoadModule<FileName>,
-> BindingResolver<'module, 'loader, 'simplifier, FileName, PS, Loader>
+> BindingResolver<'module, 'loader, 'simplifier, 'builtins, FileName, PS, Loader>
 {
     /// Create a new binding resolver over `module` that will resolve all of the
     /// bindings into a singular `BindingResolutionMap` for this module
-    pub fn new(module: &'module Module<FileName>, path_simplifier: &'simplifier mut PS, loader: &'loader mut Loader) -> Self {
+    pub fn new(
+        module: &'module Module<FileName>,
+        path_simplifier: &'simplifier mut PS,
+        loader: &'loader mut Loader,
+        builtins: &'builtins Builtins,
+    ) -> Self {
         Self {
             resolution_map: BindingResolutionMap::new(),
             errors: Vec::new(),
@@ -129,6 +143,7 @@ impl<
             next_function_id: 0,
             path_simplifier,
             loader,
+            builtins,
         }
     }
 
@@ -151,6 +166,9 @@ impl<
         BindingResolutionMap<FileName>,
         Vec<BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError>>,
     > {
+        // Register all the builtins so they don't fail later during name resolution
+        self.register_builtins();
+
         // Register all module TLS so that things can refer to eachother
         self.module_pre_pass();
 
@@ -543,7 +561,7 @@ impl<
         )
     }
 
-    /// Returns an DuplicateTopLevelDefinition error for some binding
+    /// Returns an DuplicateTopLevelDefinition/RedefineBuiltin error for some binding
     ///
     /// The span passed in is where the duplicate occured, as opposed
     /// to the binding being the original
@@ -554,9 +572,14 @@ impl<
     ) -> BindingResolveError<FileName, PS::PathSimplificationError, Loader::ResolveSourceError>
     {
         self.make_located(
-            BindingResolveErrorKind::DuplicateTopLevelDefinition {
-                name: binding.kind.name.clone(),
-                original: binding.location.clone(),
+            match binding.kind.kind {
+                BindingKind::Builtin => BindingResolveErrorKind::RedefineBuiltin {
+                    name: binding.kind.name.clone(),
+                },
+                _ => BindingResolveErrorKind::DuplicateTopLevelDefinition {
+                    name: binding.kind.name.clone(),
+                    original: binding.location.clone(),
+                },
             },
             span,
         )
@@ -1299,7 +1322,20 @@ impl<
             _ => {}
         }
     }
-    
+
+    /// Registers all the builtins into the scope tree and resolution map
+    /// such that they're all known
+    fn register_builtins(&mut self) {
+        // A synthetic location, they don't really exist.
+        let synthetic_location = self.make_location(Span { start: 0, end: 0 });
+        for def in self.builtins.0 {
+            self.resolution_map.scope_tree.define(
+                def.name.to_string(),
+                BindingKind::Builtin,
+                synthetic_location.clone(),
+            );
+        }
+    }
 }
 
 impl<FileName: Display + PartialEq + Clone> BindingResolutionMap<FileName> {

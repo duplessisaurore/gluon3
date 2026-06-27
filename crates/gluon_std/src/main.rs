@@ -14,6 +14,7 @@
 #![feature(try_find)]
 
 use clap::Parser;
+use gluon_bindings::{CrossModuleBindingResolver, PathSimplifier, builtins::PRIMITIVES};
 use gluon_debug::SourceFile;
 use gluon_lexer::Lexer;
 use gluon_module_resolver::{LoadModule, ModuleLoader};
@@ -96,7 +97,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
+    // Resolve all bindings in the modules
+    let mut cleaner = StdCleaner {
+    };
+
+    let binding_resolver = CrossModuleBindingResolver::new(&resolved_graph, &mut cleaner, &mut loader, &PRIMITIVES);
+    let binding_resolved_map = binding_resolver.resolve_all().unwrap_or_else(|e| {
+        eprintln!("binding resolving error: {:?}", e);
+        process::exit(1);
+    });
+
+    println!("RESOLVED GRAPH");
+    println!("===============");
     println!("{:#?}", resolved_graph);
+    println!("");
+    println!("RESOLVED BINDINGS");
+    println!("===============");
+    println!("{:#?}", binding_resolved_map);
 
     Ok(())
 }
@@ -232,5 +249,44 @@ impl CleanPath for PathBuf {
             .map_err(|error| CleanPathError::IOError { error })?;
 
         Ok(absolute.into_owned())
+    }
+}
+
+/// A simple cleaner of linux paths
+/// that removes everything before the file name
+/// and all extensions
+struct StdCleaner {}
+
+
+/// Errors that can occur when simplifying a Std path
+#[derive(Debug)]
+pub enum StdPathSimplificationError {
+    /// Cleaning the path up failed
+    CleanPathError { error: CleanPathError },
+
+    /// There was no file name
+    NoFilePrefix,
+
+    /// The file name was illegal
+    IllegalModuleName { reason: String }
+}
+
+impl PathSimplifier for StdCleaner {
+    type PathSimplificationError = StdPathSimplificationError;
+
+    fn simplify_path_to_ident<'path>(&mut self, path: &'path str) -> Result<String, Self::PathSimplificationError> {
+        let cleaned_path = PathBuf::from(path).clean_path().map_err(|error| StdPathSimplificationError::CleanPathError { error })?;
+
+        // Get the file stem (cleaned up file) itself
+        let file_stem = String::from(cleaned_path.file_prefix().ok_or_else(|| {
+            StdPathSimplificationError::NoFilePrefix
+        })?.to_string_lossy());
+        
+        // Make sure its all legal (doesn't contain a ".")
+        if file_stem.contains('.') {
+            return Err(StdPathSimplificationError::IllegalModuleName { reason: "Contains `.` characters".to_string() });
+        }
+
+        Ok(file_stem)
     }
 }

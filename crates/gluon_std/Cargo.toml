@@ -21,6 +21,7 @@ gluon_lexer = { workspace = true }
 gluon_debug = { workspace = true }
 gluon_parser = { workspace = true }
 gluon_module_resolver = { workspace = true }
+gluon_bindings = { workspace = true }
 
 # Argument parsing helper
 clap = { version = "4.5", features = ["derive", "wrap_help"] }

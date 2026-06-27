@@ -3,7 +3,7 @@
 //! This runs the `BindingResolver` on each module
 //! and validates their cross-module pending resolutions
 
-use core::{fmt::Display, hash::Hash};
+use core::{fmt::{Display, Debug}, hash::Hash};
 
 use alloc::{rc::Rc, vec::Vec};
 use gluon_debug::{SourceFile, SourceLocation};
@@ -12,7 +12,7 @@ use gluon_parser::ast::{NodeId, Publicity};
 use hashbrown::HashMap;
 
 use crate::{
-    binding_trait::PathSimplifier, bindings::BindingKind, errors::CrossModuleError, resolver::{BindingResolutionMap, BindingResolver, ModuleFieldResolution},
+    Builtins, binding_trait::PathSimplifier, bindings::BindingKind, errors::CrossModuleError, resolver::{BindingResolutionMap, BindingResolver, ModuleFieldResolution},
 };
 
 /// The fully resolved cross module included resolution map
@@ -33,23 +33,29 @@ pub struct CrossModuleBindingResolver<
     'graph,
     'loader,
     'simplifier,
+    'builtins,
     FileName: Display + Clone + PartialEq + Hash + Eq,
     PS: PathSimplifier,
     Loader: LoadModule<FileName>,
 > {
+    // The full graph to resolve
     graph: &'graph ResolvedGraph<FileName>,
+
+    // Arguments to share to each resolver..
     path_simplifier: &'simplifier mut PS,
     loader: &'loader mut Loader,
+    builtins: &'builtins Builtins,
 }
 
 impl<
     'graph,
     'loader,
     'simplifier,
-    FileName: Display + Clone + PartialEq + Hash + Eq,
+    'builtins,
+    FileName: Debug + Display + Clone + PartialEq + Hash + Eq,
     PS: PathSimplifier,
     Loader: LoadModule<FileName>,
-> CrossModuleBindingResolver<'graph, 'loader, 'simplifier, FileName, PS, Loader>
+> CrossModuleBindingResolver<'graph, 'loader, 'simplifier, 'builtins, FileName, PS, Loader>
 {
     /// Create a new binding resolver over `graph` that will resolve all of the
     /// bindings for all the modules into a singular `CrossModuleResolutionMap`
@@ -57,11 +63,13 @@ impl<
         graph: &'graph ResolvedGraph<FileName>,
         path_simplifier: &'simplifier mut PS,
         loader: &'loader mut Loader,
+        builtins: &'builtins Builtins
     ) -> Self {
         Self {
             graph,
             path_simplifier,
             loader,
+            builtins
         }
     }
 
@@ -88,6 +96,7 @@ impl<
             graph,
             path_simplifier,
             loader,
+            builtins
         } = self;
 
         // Store all errors and resolved module maps here
@@ -98,7 +107,7 @@ impl<
         // Per-module resolution
         for (source_file, module) in &graph.modules {
             // New resolver for thos module
-            let resolver = BindingResolver::new(module, path_simplifier, loader);
+            let resolver = BindingResolver::new(module, path_simplifier, loader, builtins);
             match resolver.resolve_bindings() {
                 // If successful, then add to the overall map else add to errors
                 Ok(map) => {
@@ -201,6 +210,11 @@ impl<
                 .expect("we literally just iterated over this source_file it must exist here")
                 .module_field_resolutions
                 .insert(node_id, resolution);
+        }
+
+        // We can drop all of the pending accesses now as we've resolved them to save some memory ig
+        for resolution_map in modules.values_mut() {
+            resolution_map.pending_module_accesses.clear();
         }
 
         Ok(CrossModuleResolutionMap { modules })

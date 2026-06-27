@@ -28,12 +28,26 @@ pub mod resolver;
 /// Errors that can occur during the name
 /// resolution process
 pub mod errors;
+pub use errors::BindingResolveErrorKind;
+pub use errors::CrossModuleError;
 
 /// Trait for simplifying paths down to the
 /// actual binding name for imports
 pub mod binding_trait;
 
+// This is required for the phase to run
+pub use binding_trait::PathSimplifier;
+
 /// The cross-module resolution handler
 /// which takes a `ResolvedGraph` and runs
 /// the `BindingResolver` on each module
 pub mod cross_module_resolver;
+
+// This is the main export/class of this phase
+pub use cross_module_resolver::CrossModuleBindingResolver;
+pub use cross_module_resolver::CrossModuleResolutionMap;
+
+/// Builtin names handling so that they dont
+/// go as `UnresolvedNames` and stay happy :D
+pub mod builtins;
+pub use builtins::Builtins;

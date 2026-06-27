@@ -29,6 +29,9 @@ pub enum BindingResolveErrorKind<FileName: Display + Clone + PartialEq, PathSimp
         original: SourceLocation<FileName>
     },
 
+    /// The user tried to redefine a builtin
+    RedefineBuiltin { name: String },
+
     /// There was an attempted assignment to an immutable binding
     /// 
     /// The immutable binding was defined originally at `original`

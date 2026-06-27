@@ -1,10 +1,10 @@
 [package]
-name = "gluon_name_resolver"
+name = "gluon_bindings"
 version = "1.0.0"
 edition = "2024"
 authors = ["The Gluon3 Contributors"]
 
-description = "The Gluon3 compilers's name resolver which takes all Modules and attempts to resolve all bindings for each module"
+description = "The Gluon3 compilers's binding resolver which takes all Modules and attempts to resolve all bindings for each module"
 readme = "README.md"
 
 repository = "https://github.com/duplessisaurore/gluon3"
