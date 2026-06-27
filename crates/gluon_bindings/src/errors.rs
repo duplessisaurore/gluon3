@@ -3,7 +3,7 @@
 use core::fmt::Display;
 
 use alloc::string::String;
-use gluon_debug::Located ;
+use gluon_debug::{Located, SourceLocation, Span} ;
 use gluon_parser::ast::ExprKind;
 
 /// Result of one step of the binding resolving process
@@ -23,8 +23,10 @@ pub enum BindingResolveErrorKind<FileName: Display + Clone + PartialEq, PathSimp
     },
 
     /// A duplicate top level definition of a name was found
+    /// to be defined originally at `Span`
     DuplicateTopLevelDefinition {
         name: String,
+        original: SourceLocation<FileName>
     },
 
     /// There was an attempted assignment to an immutable binding
@@ -39,6 +41,7 @@ pub enum BindingResolveErrorKind<FileName: Display + Clone + PartialEq, PathSimp
 
     /// An unexpected AstNode occured here with some kind
     UnexpectedExprKind {
+        expected: String,
         kind: ExprKind<FileName>
     },
 
